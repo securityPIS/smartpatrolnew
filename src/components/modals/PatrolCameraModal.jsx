@@ -12,7 +12,8 @@ import { usePatrol } from '../../context/AppContextRuntime';
 import { captureNativeCameraPhoto, isNativeRuntime } from '../../services/native/capacitorBridge';
 import { readImageFileAsDataUrl } from '../../utils/images';
 
-const PATROL_CAMERA_MAX_EDGE = 1600;
+// Sumber foto full-res (≤2000px). Thumbnail diturunkan dari sini saat capture.
+const PATROL_CAMERA_MAX_EDGE = 2000;
 const PATROL_CAMERA_IMAGE_QUALITY = 0.80;
 
 /**

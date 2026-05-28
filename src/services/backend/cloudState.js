@@ -9,6 +9,7 @@ Side Effects: Membaca/menulis tabel profiles, ships, patrol_reports, incidents, 
 import { sanitizeEmail, sanitizePhone, sanitizeText, sanitizeUrl } from '../../utils/sanitize';
 import { ensureSupabaseClient, isSupabaseConfigured } from './app';
 import { uploadCloudDataUrlAsset } from './assets';
+import { applyFullPhotoRefs } from './patrolReports';
 import { enqueueOutboxMutation, loadCacheSnapshot, registerOutboxHandler, saveCacheSnapshot } from './outbox';
 
 const CLOUD_STATE_SCHEMA_VERSION = 1;
@@ -70,7 +71,7 @@ function shipToState(row = {}) {
 }
 
 function reportRowToCheckpoint(row = {}) {
-  return {
+  const checkpoint = {
     ...(row.payload || {}),
     id: row.checkpoint_id || row.payload?.id || row.payload?.checkpointId,
     checkpointId: row.checkpoint_id || row.payload?.checkpointId,
@@ -81,6 +82,7 @@ function reportRowToCheckpoint(row = {}) {
     resultType: row.result_type || row.payload?.resultType || null,
     photoUrl: row.photo_url || row.payload?.photoUrl || null,
   };
+  return applyFullPhotoRefs(checkpoint, row.patrol_report_photos);
 }
 
 function incidentRowToState(row = {}) {
@@ -202,7 +204,7 @@ async function hydrateStateFromSql() {
   const [profiles, ships, reports, incidents, sosAlerts, notifications] = await Promise.all([
     supabase.from('profiles').select('*').order('name', { ascending: true }),
     supabase.from('ships').select('*').order('name', { ascending: true }),
-    supabase.from('patrol_reports').select('*').limit(500),
+    supabase.from('patrol_reports').select('*, patrol_report_photos(id, full_object_key, full_storage_provider, full_media_status, payload)').limit(500),
     supabase.from('incidents').select('*').order('created_at', { ascending: false }).limit(200),
     supabase.from('sos_alerts').select('*').order('triggered_at', { ascending: false }).limit(20),
     supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(120),

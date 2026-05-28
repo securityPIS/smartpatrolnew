@@ -11,7 +11,7 @@ import {
   Sun, Cloud, CloudRain, Wind, Thermometer,
 } from 'lucide-react';
 import { createPosterDataUrl, DEFAULT_LOCATION_OPTIONS } from '../data/defaultData';
-import { readFileAsDataUrl, readImageFileAsDataUrl } from '../utils/images';
+import { readFileAsDataUrl, readImageFileAsDataUrl, resizeDataUrlToWebp } from '../utils/images';
 import { sanitizeEmail, sanitizeMultilineText, sanitizePhone, sanitizeText, sanitizeUrl, isReportFieldValid } from '../utils/sanitize';
 import { loadImageFromDB, saveImageToDB } from '../utils/imageStore';
 import { checkStorageQuota } from '../utils/storageQuota';
@@ -44,8 +44,13 @@ import {
 } from '../services/backend/cloudState';
 import {
   savePatrolReport,
+  savePatrolReportPhoto,
   subscribeToPatrolReports,
 } from '../services/backend/patrolReports';
+import {
+  isR2FullPhotoEnabled,
+  uploadFullPhotoToR2,
+} from '../services/backend/r2Assets';
 import {
   deleteIncidentReport,
   saveIncidentReport,
@@ -897,6 +902,7 @@ function createCheckpointGalleryPhotoRecord(photoUrl, options = {}) {
   return normalizeTimeAuditRecord({
     id: options.id || `checkpoint-gallery-${trustedTimestamp.occurredAtTrustedMs}-${Math.random().toString(36).slice(2, 8)}`,
     photoUrl,
+    fullPhotoUrl: typeof options.fullPhotoUrl === 'string' ? options.fullPhotoUrl : null,
     author: sanitizeText(options.author || '', 80) || '-',
     date: options.date || formatAppDate(new Date(createdAt)),
     time: options.time || formatAppTime(new Date(createdAt)),
@@ -905,6 +911,32 @@ function createCheckpointGalleryPhotoRecord(photoUrl, options = {}) {
   }, {
     fallbackTimestampKeys: ['createdAt'],
   });
+}
+
+// Simpan foto lokal sebagai varian sesuai mode storage.
+// R2 off: satu gambar (perilaku lama) — hemat IndexedDB.
+// R2 on: thumbnail (≤360px, inline Supabase) + full (≤2000px, view R2), dua key idb terpisah.
+async function storePhotoWithVariants(sourceDataUrl) {
+  if (!sourceDataUrl) return { photoUrl: null, fullPhotoUrl: null };
+  if (!isR2FullPhotoEnabled) {
+    const photoUrl = await saveImageToDB(sourceDataUrl);
+    return { photoUrl, fullPhotoUrl: null };
+  }
+  try {
+    const fullDataUrl = await resizeDataUrlToWebp(sourceDataUrl, 2000, 0.8);
+    const thumbDataUrl = await resizeDataUrlToWebp(fullDataUrl, 360, 0.5);
+    const [photoUrl, fullPhotoUrl] = await Promise.all([
+      saveImageToDB(thumbDataUrl),
+      saveImageToDB(fullDataUrl),
+    ]);
+    return { photoUrl, fullPhotoUrl };
+  } catch (error) {
+    // Bila pembuatan varian gagal (mis. canvas diblokir), jatuh ke satu gambar
+    // agar capture tetap jalan offline.
+    console.warn('Gagal membuat varian foto, memakai satu gambar.', error);
+    const photoUrl = await saveImageToDB(sourceDataUrl);
+    return { photoUrl, fullPhotoUrl: null };
+  }
 }
 
 function resetCheckpointCollection(checkpoints, options = {}) {
@@ -4380,7 +4412,7 @@ function createCloudSyncSignalPayload(options = {}) {
 }
 
 async function pickLocalImage(options = {}) {
-  const { cameraOnly = false, cameraFacing = 'environment' } = options;
+  const { cameraOnly = false, cameraFacing = 'environment', maxEdge, quality } = options;
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'image/*';
@@ -4415,7 +4447,7 @@ async function pickLocalImage(options = {}) {
         return;
       }
       try {
-        const dataUrl = await readImageFileAsDataUrl(file);
+        const dataUrl = await readImageFileAsDataUrl(file, maxEdge, quality);
         cleanup();
         resolve(dataUrl);
       } catch (error) {
@@ -4833,6 +4865,8 @@ export function AppProvider({ children }) {
   const lastCloudSignalRevisionRef = useRef('');
   const cloudAssetCacheRef = useRef(new Map());
   const cloudAssetUploadInFlightRef = useRef(new Map());
+  // Cache full idb key -> R2 objectKey agar full-res tidak di-upload berulang per sync.
+  const r2AssetCacheRef = useRef(new Map());
   const localAssetAvailabilityRef = useRef(new Map());
   const previousOfflineStateRef = useRef(isOffline);
   const cloudSyncPriorityRef = useRef('normal');
@@ -5521,6 +5555,51 @@ export function AppProvider({ children }) {
   const failedUploadRetryTimerRef = useRef(null);
   const RETRY_QUEUE_INTERVAL_MS = 30000; // 30 detik
 
+  // Upload foto full-res ke R2 (idempoten via r2AssetCacheRef) lalu catat patrol_report_photos.
+  // Gagal upload R2 -> antre retry di failedUploadQueueRef. Gagal tulis DB ditangani outbox.
+  const prepareFullPhotoRef = useCallback(async (fullPhotoUrl, ctx = {}) => {
+    if (!isR2FullPhotoEnabled || !isLocalOnlyAssetUrl(fullPhotoUrl)) return null;
+    let objectKey = r2AssetCacheRef.current.get(fullPhotoUrl) || null;
+    try {
+      if (!objectKey) {
+        const result = await uploadFullPhotoToR2({
+          photoUrl: fullPhotoUrl,
+          shipId: ctx.shipId,
+          shiftKey: ctx.shiftKey,
+          checkpointId: ctx.checkpointId,
+          photoId: ctx.photoId,
+        });
+        objectKey = result?.objectKey || null;
+        if (objectKey) r2AssetCacheRef.current.set(fullPhotoUrl, objectKey);
+      }
+      if (!objectKey) return null;
+      await savePatrolReportPhoto({
+        id: ctx.photoRowId,
+        kind: ctx.kind || 'main',
+        galleryPhotoId: ctx.galleryPhotoId || null,
+        shipId: ctx.shipId,
+        shiftKey: ctx.shiftKey,
+        checkpointId: ctx.checkpointId,
+        thumbObjectPath: ctx.thumbObjectPath || null,
+        thumbUrl: ctx.thumbUrl || null,
+        fullObjectKey: objectKey,
+        authorId: ctx.authorId || null,
+        occurredAtTrustedMs: ctx.occurredAtTrustedMs || null,
+      });
+      return objectKey;
+    } catch (error) {
+      console.error('Gagal sync foto full-res ke R2, memasukkan ke antrian retry.', error);
+      if ((ctx.retryCount || 0) < 5) {
+        failedUploadQueueRef.current.push({
+          kind: 'r2-full',
+          fullPhotoUrl,
+          ctx: { ...ctx, retryCount: (ctx.retryCount || 0) + 1 },
+        });
+      }
+      return null;
+    }
+  }, []);
+
   const processFailedUploadQueue = useCallback(async () => {
     const queue = failedUploadQueueRef.current;
     if (queue.length === 0) return;
@@ -5529,6 +5608,11 @@ export function AppProvider({ children }) {
     failedUploadQueueRef.current = [];
 
     for (const item of currentQueue) {
+      // Item full-res R2 ditangani jalur tersendiri (upload R2 + tulis patrol_report_photos).
+      if (item.kind === 'r2-full') {
+        await prepareFullPhotoRef(item.fullPhotoUrl, item.ctx || {});
+        continue;
+      }
       // Cek apakah item masih valid (belum terupload sukses di sesi sebelumnya)
       if (cloudAssetCacheRef.current.has(item.photoUrl)) {
         const cached = cloudAssetCacheRef.current.get(item.photoUrl);
@@ -5570,7 +5654,7 @@ export function AppProvider({ children }) {
         }
       }
     }
-  }, []);
+  }, [prepareFullPhotoRef]);
 
   // Timer periodik untuk retry queue
   useEffect(() => {
@@ -5969,6 +6053,47 @@ export function AppProvider({ children }) {
         }
       }
 
+      // Jalur full-res R2 (fire-and-forget, tidak memblok return/thumbnail). Hanya saat flag aktif
+      // dan ada varian full lokal. Gagal -> antre retry; tidak pernah memblok submit.
+      if (isR2FullPhotoEnabled && readyReport) {
+        const rawGalleryById = new Map(
+          ensureArray(checkpoint.galleryPhotos).map((galleryPhoto) => [String(galleryPhoto?.id || ''), galleryPhoto]),
+        );
+        const baseCtx = {
+          shipId: checkpointReport.shipId,
+          shiftKey: checkpointReport.shiftKey,
+          checkpointId: checkpointReport.checkpointId,
+          authorId: checkpointReport.completedByUserId || null,
+          occurredAtTrustedMs: checkpointReport.occurredAtTrustedMs || null,
+        };
+        const mainFullUrl = typeof checkpoint.fullPhotoUrl === 'string' ? checkpoint.fullPhotoUrl : null;
+        if (isLocalOnlyAssetUrl(mainFullUrl)) {
+          void prepareFullPhotoRef(mainFullUrl, {
+            ...baseCtx,
+            kind: 'main',
+            photoId: `${checkpointReport.checkpointId}-main`,
+            photoRowId: `${checkpointReport.shipId}::${checkpointReport.shiftKey}::${checkpointReport.checkpointId}::main`,
+            thumbObjectPath: createCloudAssetPath('patrol-reports', checkpointReport.shipId, checkpointReport.shiftKey, checkpointReport.checkpointId, checkpointReport.photoUrl),
+            thumbUrl: uploadedPhotoUrl || null,
+          });
+        }
+        uploadedGalleryPhotos.forEach((galleryPhoto, galleryIndex) => {
+          const galleryId = String(galleryPhoto?.id || galleryIndex);
+          const rawGallery = rawGalleryById.get(String(galleryPhoto?.id || ''));
+          const galleryFullUrl = typeof rawGallery?.fullPhotoUrl === 'string' ? rawGallery.fullPhotoUrl : null;
+          if (!isLocalOnlyAssetUrl(galleryFullUrl)) return;
+          void prepareFullPhotoRef(galleryFullUrl, {
+            ...baseCtx,
+            kind: 'gallery',
+            galleryPhotoId: galleryId,
+            photoId: `${checkpointReport.checkpointId}-gallery-${galleryId}`,
+            photoRowId: `${checkpointReport.shipId}::${checkpointReport.shiftKey}::${checkpointReport.checkpointId}::gallery::${galleryId}`,
+            thumbObjectPath: createCloudAssetPath('patrol-reports-gallery', checkpointReport.shipId, checkpointReport.shiftKey, checkpointReport.checkpointId, galleryPhoto.id || galleryIndex, rawGallery?.photoUrl || ''),
+            thumbUrl: galleryPhoto?.photoUrl || null,
+          });
+        });
+      }
+
       return readyReport || pendingReport;
     } catch (error) {
       console.error('Gagal sync domain laporan patroli', error);
@@ -5976,7 +6101,7 @@ export function AppProvider({ children }) {
     } finally {
       patrolReportDomainUploadInFlightRef.current.delete(reportKey);
     }
-  }, [hasOperationalCloudAccess, isOffline, prepareCloudPhotoUrl]);
+  }, [hasOperationalCloudAccess, isOffline, prepareCloudPhotoUrl, prepareFullPhotoRef]);
   const syncIncidentDetailToDomain = useCallback((incident, meta = {}, options = {}) => {
     if (!incident || incident.isSOS) return null;
 
@@ -7541,6 +7666,7 @@ export function AppProvider({ children }) {
         gpsSnapshot: environmentSnapshot.gpsSnapshot,
         weatherSnapshot: environmentSnapshot.weatherSnapshot,
         photoUrl: formState.photoUrl,
+        fullPhotoUrl: formState.fullPhotoUrl || null,
         resultType: formState.type,
         penyebab: sanitizeMultilineText(formState.penyebab, 240),
         kejadian: sanitizeMultilineText(formState.kejadian, 280),
@@ -7615,14 +7741,15 @@ export function AppProvider({ children }) {
   const handleAddReportGalleryPhoto = useCallback(async (reportId) => {
     if (!reportId || selectedReportDetail?.readOnly) return;
 
-    const dataUrl = await pickLocalImage();
+    const dataUrl = await pickLocalImage(isR2FullPhotoEnabled ? { maxEdge: 2000, quality: 0.8 } : {});
     if (!dataUrl) return;
 
-    const photoUrl = await saveImageToDB(dataUrl);
+    const { photoUrl, fullPhotoUrl } = await storePhotoWithVariants(dataUrl);
     if (!photoUrl) return;
 
     const galleryPhoto = createCheckpointGalleryPhotoRecord(photoUrl, {
       author: currentUser || selectedReportDetail?.completedBy || '',
+      fullPhotoUrl,
     });
 
     updateOperationalShipCheckpoints((previousCheckpoints) => previousCheckpoints.map((checkpoint) => (
@@ -7714,20 +7841,24 @@ export function AppProvider({ children }) {
   const handlePatrolCameraCapture = useCallback(async (dataUrl) => {
     const captureRequest = pendingPatrolCameraCapture;
     if (!captureRequest?.id || !captureRequest?.type || !dataUrl) return;
-    const url = await saveImageToDB(dataUrl);
-    if (!url) return;
+    // Incident-progress di luar scope pipeline R2: simpan satu gambar penuh.
     if (captureRequest.intent === 'incident-progress') {
+      const url = await saveImageToDB(dataUrl);
+      if (!url) return;
       setNewProgress((previousProgress) => ({ ...previousProgress, photoUrl: url }));
       setPendingPatrolCameraCapture(null);
       return;
     }
+    const { photoUrl, fullPhotoUrl } = await storePhotoWithVariants(dataUrl);
+    if (!photoUrl) return;
     setActiveForms({
       [captureRequest.id]: {
         type: captureRequest.type,
         penyebab: '',
         kejadian: '',
         tindakLanjut: '',
-        photoUrl: url,
+        photoUrl,
+        fullPhotoUrl,
       },
     });
     setPendingPatrolCameraCapture(null);

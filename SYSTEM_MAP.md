@@ -49,6 +49,13 @@ PatrolPage -> PatrolCameraModal -> imageStore IndexedDB
   -> jika offline/gagal: outbox_mutations antre dan flush saat online
 ```
 
+Foto 2-storage (opsional, flag `VITE_ENABLE_R2_FULL_PHOTO=1`): capture membuat dua varian WebP —
+thumbnail (≤360px) di-upload ke Supabase Storage dan ditampilkan inline, full-res (≤2000px) di-upload
+ke Cloudflare R2 (presigned PUT) lewat `r2Assets`/`syncPatrolReportToDomain`. Referensi full dicatat di
+tabel `patrol_report_photos` (`full_object_key`, `full_media_status`). Klik thumbnail -> `PhotoPreviewModal`
+me-mint presigned GET R2 (atau fallback blob full lokal saat offline). Flag off = Supabase-only (degradasi
+mulus). Detail di bagian "Pipeline Foto 2-Storage" di bawah.
+
 ### Incident dan SOS
 
 ```
@@ -83,7 +90,10 @@ initializeTrustedTime
 | `src/services/backend/cloudState.js` | Hydrate/decompose state dari/ke tabel SQL dan Realtime signal. |
 | `src/services/backend/patrolReports.js` | Upsert/subscribe `patrol_reports`. |
 | `src/services/backend/incidentReports.js` | Upsert/subscribe/delete `incidents`. |
-| `src/services/backend/assets.js` | Upload Supabase Storage + signed URL. |
+| `src/services/backend/assets.js` | Upload Supabase Storage + signed URL. Ekspor `dataUrlToBlob`/`resolveLocalDataUrl` dipakai ulang R2. |
+| `src/services/backend/r2Assets.js` | Upload foto full-res ke Cloudflare R2 (presigned PUT) + mint presigned GET; flag `isR2FullPhotoEnabled`. |
+| `supabase/functions/create-r2-upload-url/*` | Presigned PUT R2 (auth + scope kapal). |
+| `supabase/functions/create-r2-download-url/*` | Presigned GET R2 TTL pendek (auth + scope kapal). |
 | `src/services/backend/outbox.js` | IndexedDB outbox mutation retry. |
 | `src/services/time/trustedTime.js` | Trusted time anchor memakai Supabase Edge Function. |
 | `supabase/migrations/202605220001_init_smartpatrol_sql.sql` | Schema Postgres, RLS, Storage policies, Realtime publication. |
@@ -211,3 +221,36 @@ Migration `202605290002_finalize_shift_from_custom_checkpoints.sql` me-`replace`
 Jadwal cron (`finalize-shift-1/2/3`) tidak diubah — cukup ganti body fungsi. Diverifikasi
 behavioral lewat Postgres lokal (aman/temuan/missed benar, termasuk match-by-name saat id
 berbeda) dan dijaga `tests/pages/finalize-shift-source.test.mjs`.
+
+## Pipeline Foto 2-Storage (Supabase thumbnail + Cloudflare R2 full-res)
+
+Tujuan: pisahkan thumbnail (kecil, inline) dari full-res (besar, on-demand) agar hemat egress
+Supabase dan biaya storage. Aktif hanya bila `VITE_ENABLE_R2_FULL_PHOTO=1` + secret R2 di-set;
+bila off, aplikasi Supabase-only seperti sebelumnya (degradasi mulus).
+
+Alur:
+1. Capture (`handlePatrolCameraCapture`/`handleAddReportGalleryPhoto`) -> `storePhotoWithVariants`
+   membuat thumbnail (≤360px q0.5) + full (≤2000px q0.8) via `src/utils/images.js`
+   (`createPhotoVariants`/`resizeDataUrlToWebp`), simpan dua key di IndexedDB. Form/checkpoint
+   bawa `photoUrl` (thumb) + `fullPhotoUrl` (full). Kamera dinaikkan ke 2000px sebagai sumber full.
+2. Sync (`syncPatrolReportToDomain`): thumbnail di-upload ke Supabase (jalur `prepareCloudPhotoUrl`
+   existing); full di-upload ke R2 via `prepareFullPhotoRef` -> `uploadFullPhotoToR2`
+   (Edge Function `create-r2-upload-url`, presigned PUT, idempoten lewat `r2AssetCacheRef`).
+   Hasil dicatat ke `patrol_report_photos` (`savePatrolReportPhoto`, outbox `patrol_report_photo.upsert`).
+   Gagal upload R2 -> antre `failedUploadQueueRef` (`kind:'r2-full'`); fire-and-forget, tak pernah memblok submit.
+3. Baca: `patrol_reports` di-select dengan embedded `patrol_report_photos`; `applyFullPhotoRefs`
+   (di `patrolReports.js`, dipakai juga `cloudState.reportRowToCheckpoint`) menempel `fullObjectKey`
+   ke checkpoint + galleryPhotos.
+4. View: `ReportDetailView` kirim `fullObjectKey`/`fullPhotoUrl`/`shipId` ke `PhotoPreviewModal`;
+   modal prioritas blob full lokal (offline) -> presigned GET R2 (`create-r2-download-url`) -> fallback thumbnail + badge.
+
+Keamanan: bucket R2 WAJIB privat; objek R2 di luar RLS Storage, otorisasi sepenuhnya di Edge Function
+(`assertOperationalShipAccess`: enabled+approved + scope kapal, ADMIN bypass). Secret R2 server-only
+(`Deno.env`), bukan `VITE_`. Cron `resign-expiring-assets` di-filter `storage_provider='supabase'`
+(R2 pakai presigned GET on-demand, tak perlu resign).
+
+Skema: migration `202605310001_add_r2_photo_storage.sql` — `media_assets.storage_provider` +
+`patrol_report_photos.full_storage_provider/full_object_key/full_media_status` (aditif `IF NOT EXISTS`).
+Regresi dijaga `tests/pages/photo-variants.test.mjs`, `tests/pages/r2-full-photo.test.mjs`,
+`tests/security/r2-access.test.mjs`. Catatan: `aws4fetch` dipakai untuk SigV4 presign R2 di Edge Function;
+foto incident-progress belum dipindah ke 2-storage (di luar scope ini).

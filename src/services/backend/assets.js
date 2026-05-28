@@ -22,14 +22,14 @@ function sanitizeStorageSegment(value, fallback = 'item') {
     .replace(/(^-|-$)/g, '') || fallback;
 }
 
-async function resolveLocalDataUrl(url) {
+export async function resolveLocalDataUrl(url) {
   if (!url || typeof url !== 'string') return null;
   if (url.startsWith('data:')) return url;
   if (url.startsWith('idb://')) return loadImageFromDB(url);
   return null;
 }
 
-function dataUrlToBlob(dataUrl) {
+export function dataUrlToBlob(dataUrl) {
   const [meta, base64Payload] = String(dataUrl || '').split(',');
   const mimeMatch = /^data:([^;]+);base64$/i.exec(meta || '');
   if (!mimeMatch || !base64Payload) {

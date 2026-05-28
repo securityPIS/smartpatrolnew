@@ -16,6 +16,8 @@ function getReportGalleryItems(reportDetail) {
     items.push({
       id: item?.id || fallbackId,
       photoUrl,
+      fullObjectKey: item?.fullObjectKey || null,
+      fullPhotoUrl: item?.fullPhotoUrl || null,
       author: item?.author || reportDetail?.completedBy || '-',
       time: item?.time || reportDetail?.time || '-',
       date: item?.date || reportDetail?.date || '',
@@ -25,6 +27,8 @@ function getReportGalleryItems(reportDetail) {
   pushItem({
     id: `${reportDetail?.id || 'report'}-cover`,
     photoUrl: reportDetail?.photoUrl,
+    fullObjectKey: reportDetail?.fullObjectKey,
+    fullPhotoUrl: reportDetail?.fullPhotoUrl,
     author: reportDetail?.completedBy,
     time: reportDetail?.time,
     date: reportDetail?.date,
@@ -94,7 +98,7 @@ export default function ReportDetailView({ isInline = false }) {
   return (
     <div className={`flex flex-col h-full bg-[#070b19] ${isInline ? 'border-l border-cyan-900/50' : 'fixed inset-0 z-[100] sm:max-w-md sm:mx-auto sm:border-x sm:border-cyan-900/50'}`}>
       {selectedReportDetail.photoUrl ? (
-        <div className="w-full h-64 bg-[#0b1229] relative shrink-0 cursor-pointer group" onClick={() => setPreviewPhoto({url: selectedReportDetail.photoUrl, author: selectedReportDetail.completedBy, time: syncDateTimeLabel})}>
+        <div className="w-full h-64 bg-[#0b1229] relative shrink-0 cursor-pointer group" onClick={() => setPreviewPhoto({url: selectedReportDetail.photoUrl, fullObjectKey: selectedReportDetail.fullObjectKey || null, fullPhotoUrl: selectedReportDetail.fullPhotoUrl || null, shipId: selectedReportDetail.shipId || null, author: selectedReportDetail.completedBy, time: syncDateTimeLabel})}>
            <AsyncImage src={selectedReportDetail.photoUrl} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" alt="Bukti" />
            <div className="absolute inset-0 bg-gradient-to-b from-[#070b19]/80 via-transparent to-[#070b19]"></div>
            {!isInline && (
@@ -139,7 +143,7 @@ export default function ReportDetailView({ isInline = false }) {
               <button
                 key={item.id || `${item.photoUrl}-${index}`}
                 type="button"
-                onClick={() => setPreviewPhoto({ url: item.photoUrl, author: item.author, time: item.date ? `${item.date} ${item.time}` : item.time })}
+                onClick={() => setPreviewPhoto({ url: item.photoUrl, fullObjectKey: item.fullObjectKey || null, fullPhotoUrl: item.fullPhotoUrl || null, shipId: selectedReportDetail.shipId || null, author: item.author, time: item.date ? `${item.date} ${item.time}` : item.time })}
                 className="w-12 h-12 shrink-0 rounded-xl overflow-hidden border border-cyan-800/60 bg-[#0b1229] hover:border-cyan-500/60 transition-all group"
                 aria-label={`Lihat foto patroli ${index + 1}`}
               >

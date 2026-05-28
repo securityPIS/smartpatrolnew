@@ -128,6 +128,40 @@ export async function findProfileForUser(user: { id: string; email?: string | nu
   return null;
 }
 
+// Verifikasi user operasional yang aktif/approved DAN berhak atas kapal tertentu.
+// ADMIN bebas; PIC/PETUGAS hanya bila ship_assigned cocok dengan nama kapal (ternormalisasi),
+// selaras dengan helper RLS can_access_ship_name. Melempar 'permission-denied' bila tidak berhak.
+export async function assertOperationalShipAccess(
+  user: { id: string; email?: string | null },
+  shipId: string,
+) {
+  const profile = await findProfileForUser(user);
+  if (!profile || profile.enabled !== true || profile.review_state !== 'approved') {
+    throw new Error('permission-denied');
+  }
+  if (normalizeRole(profile.role) === 'ADMIN') return profile;
+
+  const safeShipId = sanitizeString(shipId, 160);
+  if (!safeShipId) throw new Error('permission-denied');
+
+  const supabase = getServiceClient();
+  const { data: ship, error } = await supabase
+    .from('ships')
+    .select('name')
+    .eq('id', safeShipId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!ship) throw new Error('permission-denied');
+
+  const normalize = (value: unknown) =>
+    sanitizeString(value, 80).toLowerCase().replace(/\s+/g, ' ').trim();
+  const assigned = normalize(profile.ship_assigned);
+  if (!assigned || assigned !== normalize(ship.name)) {
+    throw new Error('permission-denied');
+  }
+  return profile;
+}
+
 export async function assertAdmin(request: Request) {
   const user = await getAuthUser(request);
   const profile = await findProfileForUser(user);

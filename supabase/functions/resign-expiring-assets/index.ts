@@ -47,6 +47,9 @@ Deno.serve(async (request) => {
     const { data: expiringAssets, error: queryError } = await supabase
       .from('media_assets')
       .select('id, bucket, object_path, owner_id, domain, signed_url_expires_at')
+      // Hanya objek Supabase Storage yang punya signed URL. Objek R2 (storage_provider='r2')
+      // diakses lewat presigned GET on-demand, jadi tak perlu (dan tak bisa) di-resign di sini.
+      .eq('storage_provider', 'supabase')
       .or(`signed_url_expires_at.is.null,signed_url_expires_at.lt.${thresholdTime}`)
       .order('signed_url_expires_at', { ascending: true, nullsFirst: true })
       .limit(BATCH_LIMIT);

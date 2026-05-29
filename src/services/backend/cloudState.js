@@ -72,6 +72,7 @@ function shipToState(row = {}) {
 function reportRowToCheckpoint(row = {}) {
   return {
     ...(row.payload || {}),
+    firestoreId: row.id || row.payload?.firestoreId || null,
     id: row.checkpoint_id || row.payload?.id || row.payload?.checkpointId,
     checkpointId: row.checkpoint_id || row.payload?.checkpointId,
     shipId: row.ship_id || row.payload?.shipId,

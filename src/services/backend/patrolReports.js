@@ -173,14 +173,17 @@ export async function savePatrolReport(report, options = {}) {
 const PATROL_REPORT_TOMBSTONES_TABLE = 'patrol_report_tombstones';
 
 // Hapus permanen temuan/laporan patroli + tombstone agar tidak dihidupkan kembali
-// oleh re-upsert idempotent dari device lain (lihat migration 202605300007).
+// oleh re-upsert idempotent dari device lain (lihat migration 202605300007/202605300008).
 //
-// Strategi pencocokan dibuat lunak: utamakan id baris (firestoreId) yang pasti; bila
-// tidak ada, cocokkan via ship_id + checkpoint_id (+ shift_key bila tersedia). Setiap
-// baris yang cocok di-tombstone via client_event_id-nya SENDIRI (dibaca dari DB), foto
-// di Storage dihapus, lalu barisnya dihapus. Melempar error agar bisa diantre ulang.
+// Dua-kunci & SELALU-tombstone: trigger DB memblokir penulisan ulang baik via
+// client_event_id maupun natural key (shift_key+ship_id+checkpoint_id). Karena
+// checkpoint hasil hydrate cloudState TIDAK membawa firestoreId, dan client_event_id
+// re-upsert bisa berbeda dari yang tersimpan, kita SELALU menulis tombstone berbasis
+// natural key dari kriteria — walau baris tidak ditemukan di SELECT — sehingga
+// re-upsert dari device manapun tetap diblokir.
 async function performPatrolReportDelete({ firestoreId, checkpointId, shiftKey, shipId } = {}) {
   const supabase = ensureSupabaseClient();
+
   let query = supabase
     .from(PATROL_REPORTS_TABLE)
     .select('id, client_event_id, shift_key, ship_id, checkpoint_id, ship_name, photo_url');
@@ -191,38 +194,55 @@ async function performPatrolReportDelete({ firestoreId, checkpointId, shiftKey, 
     query = query.eq('ship_id', shipId).eq('checkpoint_id', checkpointId);
     if (shiftKey) query = query.eq('shift_key', shiftKey);
   } else {
-    return; // kriteria tidak cukup, tidak ada yang bisa dihapus
+    return; // kriteria tidak cukup
   }
 
   const { data: rows, error: selectError } = await query;
   if (selectError) throw selectError;
-  if (!rows || rows.length === 0) return; // tidak ada baris = sudah bersih
 
-  const tombstones = rows
-    .filter((row) => row.client_event_id)
-    .map((row) => ({
+  // Tombstone dari natural key kriteria — SELALU dibuat (anti-resurrection walau
+  // SELECT meleset). client_event_id dibentuk identik dengan createClientEventId
+  // agar cocok dengan nilai yang dipakai re-upsert.
+  const tombstoneMap = new Map();
+  if (shipId && checkpointId) {
+    const naturalEventId = createClientEventId({ shiftKey, shipId, checkpointId });
+    tombstoneMap.set(naturalEventId, {
+      client_event_id: naturalEventId,
+      shift_key: shiftKey || null,
+      ship_id: shipId,
+      checkpoint_id: checkpointId,
+      ship_name: null,
+    });
+  }
+  // Tombstone dari setiap baris yang benar-benar ada (client_event_id aslinya).
+  (rows || []).forEach((row) => {
+    if (!row.client_event_id) return;
+    tombstoneMap.set(row.client_event_id, {
       client_event_id: row.client_event_id,
       shift_key: row.shift_key || null,
       ship_id: row.ship_id || null,
       checkpoint_id: row.checkpoint_id || null,
       ship_name: row.ship_name || null,
-    }));
-  if (tombstones.length > 0) {
+    });
+  });
+
+  if (tombstoneMap.size > 0) {
     const { error: tombstoneError } = await supabase
       .from(PATROL_REPORT_TOMBSTONES_TABLE)
-      .upsert(tombstones, { onConflict: 'client_event_id' });
+      .upsert(Array.from(tombstoneMap.values()), { onConflict: 'client_event_id' });
     if (tombstoneError) throw tombstoneError;
   }
 
-  for (const row of rows) {
-    if (row.photo_url) await deleteStorageAsset(row.photo_url);
+  if (rows && rows.length > 0) {
+    for (const row of rows) {
+      if (row.photo_url) await deleteStorageAsset(row.photo_url);
+    }
+    const { error: deleteError } = await supabase
+      .from(PATROL_REPORTS_TABLE)
+      .delete()
+      .in('id', rows.map((row) => row.id));
+    if (deleteError) throw deleteError;
   }
-
-  const { error: deleteError } = await supabase
-    .from(PATROL_REPORTS_TABLE)
-    .delete()
-    .in('id', rows.map((row) => row.id));
-  if (deleteError) throw deleteError;
 }
 
 registerOutboxHandler('patrol_report.delete', performPatrolReportDelete);

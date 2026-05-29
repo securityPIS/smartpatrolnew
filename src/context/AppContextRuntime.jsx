@@ -23,6 +23,7 @@ import {
   isNativeRuntime,
 } from '../services/native/capacitorBridge';
 import { setupNativePushNotifications } from '../services/native/pushNotifications';
+import { removePushSubscription } from '../services/backend/pushSubscriptions';
 import {
   getFirebaseAuthErrorMessage,
   isFirebaseAuthEnabled,
@@ -7232,6 +7233,18 @@ export function AppProvider({ children }) {
     handleNotificationClick(notification);
   }, [appendNotifications, createNotificationFromPushPayload, handleNotificationClick, openSOSAlertFromPush]);
 
+  // Token FCM device aktif; dipakai handleLogout untuk menghapus langganan saat
+  // user benar-benar keluar (bukan saat effect cleanup biasa).
+  const activePushTokenRef = useRef('');
+  // Handler push disimpan di ref agar perubahan referensi (mis. notificationRecipientIds)
+  // TIDAK memicu effect setup ulang. Re-run berlebihan menyebabkan token push dihapus &
+  // didaftarkan berulang (churn) sehingga baris di push_subscriptions sempat hilang.
+  const nativePushHandlersRef = useRef({ onNotification: () => { }, onAction: () => { } });
+  nativePushHandlersRef.current = {
+    onNotification: handleNativePushForeground,
+    onAction: handleNativePushAction,
+  };
+
   useEffect(() => {
     if (!hasOperationalCloudAccess || !nativePushProfile || !firebaseAuthUid) return () => { };
 
@@ -7239,8 +7252,9 @@ export function AppProvider({ children }) {
     let disposed = false;
 
     setupNativePushNotifications(nativePushProfile, {
-      onNotification: handleNativePushForeground,
-      onAction: handleNativePushAction,
+      onNotification: (payload) => nativePushHandlersRef.current.onNotification(payload),
+      onAction: (payload) => nativePushHandlersRef.current.onAction(payload),
+      onToken: (token) => { activePushTokenRef.current = token || ''; },
     })
       .then((cleanup) => {
         if (disposed) {
@@ -7255,9 +7269,12 @@ export function AppProvider({ children }) {
 
     return () => {
       disposed = true;
+      // Hanya lepas listener foreground; token SENGAJA dipertahankan agar push tetap
+      // sampai saat tab/app ditutup. Token dihapus hanya saat logout eksplisit
+      // (handleLogout); pergantian user di device sama ditangani upsert on conflict.
       cleanupPush?.();
     };
-  }, [firebaseAuthUid, handleNativePushAction, handleNativePushForeground, hasOperationalCloudAccess, nativePushProfile]);
+  }, [firebaseAuthUid, hasOperationalCloudAccess, nativePushProfile]);
 
   // Deep Linking from URL Parameters (e.g. from Telegram Notifications)
   useEffect(() => {
@@ -9181,6 +9198,13 @@ export function AppProvider({ children }) {
     setAuthForm(createAuthFormState());
   }, [clearOperationalSessionState]);
   const handleLogout = useCallback(async (message = 'Sesi Anda telah berakhir. Silakan login kembali.') => {
+    // Hapus langganan push device ini agar akun lain di device sama tidak menerima
+    // notifikasi milik user yang baru saja logout (best-effort; jangan blok logout).
+    const pushToken = activePushTokenRef.current;
+    if (pushToken) {
+      activePushTokenRef.current = '';
+      try { await removePushSubscription(pushToken); } catch { /* abaikan */ }
+    }
     if (firebaseAuthUser) {
       try {
         await logoutFirebaseUser();

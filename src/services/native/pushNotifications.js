@@ -4,13 +4,14 @@ Caller: AppContextRuntime setelah user operasional berhasil login (effect setupN
 Dependensi: Firebase JS SDK (app + messaging), service worker /firebase-messaging-sw.js,
             VITE_FIREBASE_* & VITE_FCM_VAPID_KEY, tabel push_subscriptions via Supabase.
 Main Functions: Minta izin notifikasi, daftarkan SW, ambil FCM token, simpan ke push_subscriptions,
-                dengarkan pesan foreground; teardown: lepas listener & hapus token.
-Side Effects: Registrasi service worker, prompt izin notifikasi, tulis/hapus push_subscriptions.
+                laporkan token via handlers.onToken; teardown hanya lepas listener (token
+                dipertahankan untuk background push, dihapus caller saat logout).
+Side Effects: Registrasi service worker, prompt izin notifikasi, tulis push_subscriptions.
 */
 
 import { initializeApp, getApps } from 'firebase/app';
 import { getMessaging, getToken, isSupported, onMessage } from 'firebase/messaging';
-import { removePushSubscription, upsertPushSubscription } from '../backend/pushSubscriptions';
+import { upsertPushSubscription } from '../backend/pushSubscriptions';
 
 // Catatan foreground: saat tab aktif, FCM tidak menampilkan notifikasi sistem dan memanggil
 // onMessage. Kita SENGAJA tidak menambahkan notifikasi ke inbox di sini karena Supabase
@@ -72,6 +73,8 @@ export async function setupNativePushNotifications(profile, handlers = {}) {
       await upsertPushSubscription({ userId, token, userAgent: navigator.userAgent }).catch((error) => {
         console.warn('Gagal menyimpan langganan push', error);
       });
+      // Beritahu caller token aktif agar bisa dihapus saat logout eksplisit.
+      try { handlers.onToken?.(token); } catch { /* abaikan */ }
     }
 
     // Subscribe foreground hanya untuk mencegah warning SDK & membuka peluang debug.
@@ -79,9 +82,10 @@ export async function setupNativePushNotifications(profile, handlers = {}) {
     const unsubscribeForeground = onMessage(messaging, () => { /* in-app via Realtime */ });
 
     return () => {
+      // Hanya lepas listener foreground. Token TIDAK dihapus di sini: penghapusan saat
+      // setiap cleanup effect menyebabkan churn (baris push_subscriptions hilang) dan
+      // melawan tujuan background push. Penghapusan token dilakukan caller saat logout.
       try { unsubscribeForeground?.(); } catch { /* abaikan */ }
-      // Hapus token saat user berganti/logout agar device tidak menerima push milik akun lama.
-      if (token) void removePushSubscription(token).catch(() => {});
     };
   } catch (error) {
     console.error('Setup web push (FCM) gagal', error);

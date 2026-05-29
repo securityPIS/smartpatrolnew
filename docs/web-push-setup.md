@@ -53,3 +53,38 @@ Jika `FCM_SERVICE_ACCOUNT` belum di-set, langkah web push otomatis dilewati — 
 - iOS Safari: web push hanya jalan bila aplikasi di-**Add to Home Screen** (PWA), iOS 16.4+.
 - Reliabilitas web push bergantung pada browser tidak di-kill total oleh OS (battery saver agresif bisa menunda).
 - Token mati otomatis dibersihkan dari `push_subscriptions` saat FCM mengembalikan `UNREGISTERED`/404.
+
+## Troubleshooting: "in-app masuk tapi push notification tidak muncul"
+
+Notifikasi in-app dan web push adalah **dua jalur berbeda**. In-app jalan lewat Supabase
+Realtime; web push lewat rantai trigger → `send-push` → FCM → service worker. Jika in-app
+muncul tapi push tidak, periksa berurutan:
+
+1. **Apakah aplikasi sedang terbuka/aktif saat diuji?** Ini penyebab #1.
+   Saat tab **terlihat (foreground)**, push banner OS sengaja TIDAK ditampilkan —
+   yang muncul hanya in-app (lihat `src/services/native/pushNotifications.js`).
+   Uji dengan tab di **background atau tertutup**. (Sejak update terbaru, saat tab
+   masih hidup tapi tidak terlihat, notifikasi sistem tetap ditampilkan.)
+
+2. **`private.app_config` sudah terisi?** Trigger membaca `functions_url` & `cron_secret`
+   dari sini. Jika kosong, trigger **no-op senyap** (sekarang menulis `RAISE NOTICE`).
+   Cek di SQL Editor:
+   ```sql
+   select key, left(value, 40) as value_preview from private.app_config;
+   ```
+   Bila kosong, jalankan ulang workflow Deploy Supabase atau set manual (lihat bagian Deploy).
+
+3. **Edge function secret terpasang?** `CRON_SECRET` (harus sama dengan `private.app_config.cron_secret`)
+   dan `FCM_SERVICE_ACCOUNT` harus ada di Supabase secrets. `send-push` membalas
+   `401 unauthorized` bila `x-cron-secret` tak cocok.
+
+4. **Ada token di `push_subscriptions`?** `send-push` mencari token by `user_id` =
+   `target_user_id` notifikasi. Bila kosong, balasannya `{ ok: true, sent: 0, reason: 'no-tokens' }`.
+   ```sql
+   select user_id, left(fcm_token, 12) as token, user_agent from public.push_subscriptions;
+   ```
+   Pastikan izin notifikasi sudah `granted` dan SW `firebase-messaging-sw.js` aktif
+   (Chrome DevTools → Application → Service Workers).
+
+5. **Logs.** Lihat Postgres logs untuk `[send-push]` (notice dari trigger) dan
+   Edge Function logs `send-push` di dashboard Supabase untuk respons FCM.

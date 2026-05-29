@@ -77,9 +77,31 @@ export async function setupNativePushNotifications(profile, handlers = {}) {
       try { handlers.onToken?.(token); } catch { /* abaikan */ }
     }
 
-    // Subscribe foreground hanya untuk mencegah warning SDK & membuka peluang debug.
-    // Tidak menambah ke inbox (lihat catatan di atas) — Realtime yang menangani.
-    const unsubscribeForeground = onMessage(messaging, () => { /* in-app via Realtime */ });
+    // Foreground handler. FCM memanggil onMessage (bukan SW onBackgroundMessage) selama
+    // halaman masih "hidup" — termasuk saat tab TIDAK terlihat (pindah tab/app, layar
+    // terkunci tapi browser belum di-kill). Pada kondisi itu SW tidak menampilkan apa-apa,
+    // sehingga push terasa "tidak muncul". Maka:
+    //   - Saat tab benar-benar terlihat (visible): jangan tampilkan notifikasi sistem —
+    //     in-app via Supabase Realtime yang menangani (hindari dobel).
+    //   - Saat tab tidak terlihat (hidden): tampilkan notifikasi sistem sendiri via SW.
+    const unsubscribeForeground = onMessage(messaging, (payload) => {
+      try {
+        if (typeof document !== 'undefined' && document.visibilityState === 'visible') return;
+        const notif = payload?.notification || {};
+        const data = payload?.data || {};
+        const title = notif.title || data.title || 'SmartPatrol';
+        const body = notif.body || data.body || '';
+        registration.showNotification(title, {
+          body,
+          icon: '/favicon-smartpatrol.svg',
+          badge: '/favicon-smartpatrol.svg',
+          tag: data.type || notif.tag || 'smartpatrol',
+          data,
+        });
+      } catch (error) {
+        console.warn('Gagal menampilkan notifikasi push foreground (hidden)', error);
+      }
+    });
 
     return () => {
       // Hanya lepas listener foreground. Token TIDAK dihapus di sini: penghapusan saat

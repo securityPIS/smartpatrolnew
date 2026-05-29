@@ -116,13 +116,15 @@ jobs:
               ;;
             *)
               # Config disimpan di tabel private.app_config (lihat migration
-              # 202605290003_fix_asset_resign_config.sql). Ini HANYA dipakai cron
-              # resign-expiring-assets (refresh signed URL foto) — bukan finalize_shift/
-              # history patroli. Jangan gagalkan deploy; bila perlu, set manual di SQL Editor:
+              # 202605290003_fix_asset_resign_config.sql). Dipakai oleh:
+              #   - cron resign-expiring-assets (refresh signed URL foto), DAN
+              #   - trigger dispatch_push_for_notification() -> WEB PUSH NOTIFICATION.
+              # Jika gagal, WEB PUSH TIDAK AKAN TERKIRIM (trigger no-op). Jangan
+              # gagalkan deploy, tapi set manual di SQL Editor:
               #   insert into private.app_config (key, value) values
               #     ('functions_url', '<functions_url>'), ('cron_secret', '<CRON_SECRET>')
               #   on conflict (key) do update set value = excluded.value, updated_at = now();
-              echo "::warning::Gagal tulis private.app_config (HTTP $http_code). Set manual di SQL Editor bila fitur re-sign foto dipakai. Tidak memengaruhi sinkronisasi patroli / finalize_shift."
+              echo "::warning::Gagal tulis private.app_config (HTTP $http_code). PUSH NOTIFICATION & re-sign foto TIDAK akan jalan sampai ini di-set manual di SQL Editor. Sinkronisasi patroli / finalize_shift tidak terpengaruh."
               ;;
           esac
 

@@ -74,9 +74,19 @@ muncul tapi push tidak, periksa berurutan:
    ```
    Bila kosong, jalankan ulang workflow Deploy Supabase atau set manual (lihat bagian Deploy).
 
-3. **Edge function secret terpasang?** `CRON_SECRET` (harus sama dengan `private.app_config.cron_secret`)
-   dan `FCM_SERVICE_ACCOUNT` harus ada di Supabase secrets. `send-push` membalas
-   `401 unauthorized` bila `x-cron-secret` tak cocok.
+3. **Edge function secret terpasang & VALID?** `CRON_SECRET` (harus sama dengan
+   `private.app_config.cron_secret`) dan `FCM_SERVICE_ACCOUNT` harus ada di Supabase secrets.
+   `send-push` membalas `401 unauthorized` bila `x-cron-secret` tak cocok.
+
+   ⚠️ **Penyebab nyata yang pernah terjadi:** log `send-push` menampilkan
+   `pengiriman gagal (rejected) { reason: "FCM_SERVICE_ACCOUNT bukan JSON valid." }`
+   sehingga `sent: 0` walau token ada. Artinya isi secret `FCM_SERVICE_ACCOUNT`
+   bukan JSON utuh (kepotong / kena smart-quote / salah paste). **Solusi:** download
+   ulang file JSON service account di Firebase Console (Project Settings → Service
+   accounts → Generate new private key), copy **seluruh** isinya (dari `{` sampai `}`),
+   lalu set ulang secret `FCM_SERVICE_ACCOUNT` (GitHub Secret + Run workflow Deploy,
+   atau langsung di Supabase → Edge Functions → Secrets). Pastikan ada field
+   `client_email`, `private_key`, dan `project_id`.
 
 4. **Ada token di `push_subscriptions`?** `send-push` mencari token by `user_id` =
    `target_user_id` notifikasi. Bila kosong, balasannya `{ ok: true, sent: 0, reason: 'no-tokens' }`.

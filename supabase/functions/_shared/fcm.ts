@@ -24,16 +24,41 @@ let cachedServiceAccount: ServiceAccount | null = null;
 
 export function getServiceAccount(): ServiceAccount {
   if (cachedServiceAccount) return cachedServiceAccount;
-  const raw = Deno.env.get('FCM_SERVICE_ACCOUNT') || '';
+  let raw = Deno.env.get('FCM_SERVICE_ACCOUNT') || '';
   if (!raw) throw new Error('FCM_SERVICE_ACCOUNT belum dikonfigurasi.');
+
+  // Toleran terhadap cara-set yang umum bikin JSON "tidak valid":
+  //  - spasi/baris baru di ujung
+  //  - terbungkus tanda kutip ekstra ('...' atau "...") oleh shell/UI
+  //  - di-encode base64 (workaround agar newline private_key aman)
+  raw = raw.trim();
+  if (raw.length >= 2 && ((raw[0] === '"' && raw.at(-1) === '"') || (raw[0] === "'" && raw.at(-1) === "'"))) {
+    raw = raw.slice(1, -1).trim();
+  }
+  if (!raw.startsWith('{')) {
+    // Mungkin base64 dari JSON. Coba decode; kalau hasilnya '{...}', pakai itu.
+    try {
+      const decoded = atob(raw.replace(/\s+/g, '')).trim();
+      if (decoded.startsWith('{')) raw = decoded;
+    } catch {
+      // bukan base64 — biarkan, JSON.parse di bawah yang akan melapor.
+    }
+  }
+
   let parsed: ServiceAccount;
   try {
     parsed = JSON.parse(raw);
-  } catch {
-    throw new Error('FCM_SERVICE_ACCOUNT bukan JSON valid.');
+  } catch (error) {
+    // Pesan diagnostik tanpa membocorkan isi secret: panjang + 1 char awal.
+    const reason = error instanceof Error ? error.message : 'unknown';
+    throw new Error(
+      `FCM_SERVICE_ACCOUNT bukan JSON valid (len=${raw.length}, mulai='${raw.slice(0, 1)}'): ${reason}. ` +
+      'Pastikan secret berisi ISI PENUH file JSON service account Firebase (mulai "{" diakhiri "}").',
+    );
   }
-  if (!parsed.client_email || !parsed.private_key || !parsed.project_id) {
-    throw new Error('FCM_SERVICE_ACCOUNT tidak lengkap (client_email/private_key/project_id).');
+  const missing = ['client_email', 'private_key', 'project_id'].filter((k) => !(parsed as Record<string, unknown>)[k]);
+  if (missing.length > 0) {
+    throw new Error(`FCM_SERVICE_ACCOUNT tidak lengkap (field kosong: ${missing.join(', ')}).`);
   }
   cachedServiceAccount = parsed;
   return parsed;

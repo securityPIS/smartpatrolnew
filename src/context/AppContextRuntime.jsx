@@ -1116,6 +1116,7 @@ function createPatrolIncidentRecord(checkpoint, options = {}) {
     readOnly: readOnly || Boolean(checkpoint?.readOnly),
     completedAt: checkpoint?.completedAt || null,
     checkpointId: checkpoint?.id || null,
+    firestoreId: checkpoint?.firestoreId || null,
     shiftKey: checkpoint?.shiftKey || null,
     shipId: checkpoint?.shipId || null,
     gpsSnapshot: checkpoint?.gpsSnapshot || null,
@@ -9011,14 +9012,11 @@ export function AppProvider({ children }) {
           }));
           void deleteSosAlert(incidentId);
         } else if (incident.isPatrol) {
-          let removedFromActiveShift = false;
-
           setCheckpointsByShip((previousState) => Object.fromEntries(
             Object.entries(previousState).map(([shipId, shipCheckpoints]) => ([
               shipId,
               shipCheckpoints.map((checkpoint) => {
                 if (createPatrolIncidentId(checkpoint) !== incidentId) return checkpoint;
-                removedFromActiveShift = true;
                 return resetCheckpointForShift(checkpoint, {
                   shiftKey: currentShiftMeta.key,
                   pendingOrigin: 'manual-reset',
@@ -9027,27 +9025,23 @@ export function AppProvider({ children }) {
             ])),
           ));
 
-          if (!removedFromActiveShift) {
-            setIncidentMeta((previousMeta) => ({
-              ...previousMeta,
-              [incidentId]: {
-                ...(previousMeta[incidentId] || {}),
-                deleted: true,
-              },
-            }));
-          } else {
-            setIncidentMeta((previousMeta) => {
-              if (!previousMeta[incidentId]) return previousMeta;
-              const nextMeta = { ...previousMeta };
-              delete nextMeta[incidentId];
-              return nextMeta;
-            });
-          }
+          // Tandai deleted (tombstone lokal) di KEDUA kasus — bukan hanya saat bukan
+          // shift aktif. Ini memastikan temuan tidak muncul lagi di daftar admin walau
+          // baris patrol_reports sempat dibangun ulang oleh hydrate sebelum delete +
+          // tombstone DB selesai. createPatrolIncidentId untuk shift baru memakai
+          // completedAt berbeda, jadi flag ini tidak menyembunyikan temuan baru.
+          setIncidentMeta((previousMeta) => ({
+            ...previousMeta,
+            [incidentId]: {
+              ...(previousMeta[incidentId] || {}),
+              deleted: true,
+            },
+          }));
           void deletePatrolReport({
+            firestoreId: incident.firestoreId,
             checkpointId: incident.checkpointId,
             shiftKey: incident.shiftKey,
             shipId: incident.shipId,
-            photoUrl: incident.photoUrl,
           });
         } else {
           const deletedAt = new Date().toISOString();

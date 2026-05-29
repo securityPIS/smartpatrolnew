@@ -36,6 +36,8 @@ import {
   fetchCloudAppState,
   isCloudSyncEnabled,
   isCloudWriteEnabled,
+  markNotificationRecipientRead,
+  persistNotificationRecords,
   publishCloudSyncSignal,
   saveCloudAppState,
   subscribeToCloudAppState,
@@ -10089,6 +10091,42 @@ export function AppProvider({ children }) {
     previousUsersDataRef.current = usersData;
     appendNotifications(assignmentNotifications);
   }, [appendNotifications, getShipRecipients, usersData]);
+
+  // Persistensi notifikasi ke cloud (fan-out per penerima). Efek ini menjaga agar
+  // notifikasi yang dibuat lokal benar-benar tersimpan di tabel notifications sehingga
+  // sampai ke device penerima lain, dan status baca milik user ini ikut tersinkron.
+  // Idempoten: insert pakai ignoreDuplicates, update read hanya untuk baris milik user.
+  const notificationSyncRef = useRef(new Map());
+  useEffect(() => {
+    if (!isCloudSyncEnabled || !isCloudWriteEnabled || isOffline || !hasOperationalCloudAccess) return;
+    const recordsToCreate = [];
+    const readBaseIds = [];
+    ensureArray(notifications).forEach((notification) => {
+      if (!notification?.id) return;
+      const targetUserIds = Array.isArray(notification.targetUserIds) ? notification.targetUserIds : [];
+      if (targetUserIds.length === 0) return;
+      const readByUserIds = Array.isArray(notification.readByUserIds) ? notification.readByUserIds : [];
+      const targetSig = targetUserIds.slice().sort().join(',');
+      const ownRead = Boolean(currentUserId && readByUserIds.includes(currentUserId));
+      const signature = `${targetSig}|${ownRead ? 1 : 0}`;
+      const previousSig = notificationSyncRef.current.get(notification.id);
+      if (previousSig === signature) return;
+      const previousTargetSig = previousSig ? previousSig.split('|')[0] : null;
+      if (previousTargetSig !== targetSig) recordsToCreate.push(notification);
+      if (ownRead) readBaseIds.push(notification.id);
+      notificationSyncRef.current.set(notification.id, signature);
+    });
+    if (recordsToCreate.length > 0) {
+      persistNotificationRecords(recordsToCreate).catch((error) => {
+        console.warn('Gagal menyimpan notifikasi ke cloud', error);
+      });
+    }
+    if (readBaseIds.length > 0 && currentUserId) {
+      markNotificationRecipientRead(readBaseIds, currentUserId).catch((error) => {
+        console.warn('Gagal menandai notifikasi dibaca di cloud', error);
+      });
+    }
+  }, [currentUserId, hasOperationalCloudAccess, isOffline, notifications]);
 
   // Weather
   useEffect(() => {

@@ -197,6 +197,121 @@ function shipToRow(ship = {}) {
   };
 }
 
+function isRowLevelSecurityError(error) {
+  return String(error?.message || '').toLowerCase().includes('row-level security');
+}
+
+function deriveNotificationTone(type = '') {
+  if (type === 'sos' || type === 'sos_triggered' || type.startsWith('sos')) return 'critical';
+  if (
+    type === 'checkpoint_pending'
+    || type === 'checkpoint_missed'
+    || type === 'registration_pending'
+    || type.startsWith('incident')
+  ) {
+    return 'warning';
+  }
+  if (type === 'welcome_to_ship' || type === 'registration_approved') return 'success';
+  return 'info';
+}
+
+// Mengubah satu notifikasi frontend (banyak penerima) menjadi banyak baris DB fan-out
+// (satu baris per penerima). target_user_id terisi agar RLS notifications_read_target
+// dan status baca per-user bekerja natural, sekaligus siap untuk push notification.
+function notificationRecordToRows(record = {}) {
+  const baseId = sanitizeText(record.id || '', 200);
+  if (!baseId) return [];
+  const targetUserIds = Array.from(new Set(
+    (Array.isArray(record.targetUserIds) ? record.targetUserIds : []).filter(Boolean),
+  ));
+  if (targetUserIds.length === 0) return [];
+  const readSet = new Set((Array.isArray(record.readByUserIds) ? record.readByUserIds : []).filter(Boolean));
+  const shipName = sanitizeText(record.shipName || '', 120) || null;
+  const type = sanitizeText(record.type || 'general', 80) || 'general';
+  const title = sanitizeText(record.title || 'Notifikasi Sistem', 200) || 'Notifikasi Sistem';
+  const body = sanitizeText(record.message || '', 1500);
+  const tone = deriveNotificationTone(type);
+  const createdAt = record.createdAt || new Date().toISOString();
+  const payload = { ...record, baseId };
+  return targetUserIds.map((targetUserId) => ({
+    id: `${baseId}::${targetUserId}`,
+    target_user_id: targetUserId,
+    target_role: null,
+    ship_name: shipName,
+    type,
+    title,
+    body,
+    tone,
+    read: readSet.has(targetUserId),
+    payload,
+    created_at: createdAt,
+  }));
+}
+
+// Kebalikan dari fan-out: gabungkan kembali baris-baris DB menjadi satu record frontend
+// dengan targetUserIds[] dan readByUserIds[]. Baris (kolom read) adalah sumber kebenaran
+// status baca per penerima.
+function reconstructNotificationsFromRows(rows = []) {
+  const groups = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const payload = row?.payload && typeof row.payload === 'object' ? row.payload : {};
+    const baseId = payload.baseId
+      || (typeof row?.id === 'string' && row.id.includes('::') ? row.id.split('::')[0] : row?.id);
+    if (!baseId) return;
+    let group = groups.get(baseId);
+    if (!group) {
+      const { targetUserIds: _ignoreTargets, readByUserIds: _ignoreReads, ...baseRest } = payload;
+      group = {
+        base: { ...baseRest, id: baseId },
+        targetUserIds: new Set(),
+        readByUserIds: new Set(),
+        createdAt: payload.createdAt || row?.created_at || new Date().toISOString(),
+      };
+      groups.set(baseId, group);
+    }
+    if (row?.target_user_id) {
+      group.targetUserIds.add(row.target_user_id);
+      if (row.read) group.readByUserIds.add(row.target_user_id);
+    }
+  });
+  return Array.from(groups.values()).map((group) => ({
+    ...group.base,
+    targetUserIds: Array.from(group.targetUserIds),
+    readByUserIds: Array.from(group.readByUserIds),
+    createdAt: group.createdAt,
+  }));
+}
+
+// Persist notifikasi baru ke tabel (fan-out). ignoreDuplicates memastikan status baca
+// baris yang sudah ada tidak pernah ditimpa — pembaruan status baca lewat
+// markNotificationRecipientRead. Aman dipanggil idempoten oleh device mana pun.
+export async function persistNotificationRecords(records = []) {
+  if (!isCloudWriteEnabled) return;
+  const rows = (Array.isArray(records) ? records : []).flatMap(notificationRecordToRows);
+  if (rows.length === 0) return;
+  const supabase = ensureSupabaseClient();
+  const { error } = await supabase
+    .from('notifications')
+    .upsert(rows, { onConflict: 'id', ignoreDuplicates: true });
+  if (error && !isRowLevelSecurityError(error)) throw error;
+}
+
+// Tandai notifikasi sebagai dibaca hanya untuk baris milik user ini (RLS update
+// hanya mengizinkan target_user_id = current_profile_id()).
+export async function markNotificationRecipientRead(baseIds = [], userId = '') {
+  if (!isCloudWriteEnabled || !userId) return;
+  const ids = (Array.isArray(baseIds) ? baseIds : [])
+    .filter(Boolean)
+    .map((baseId) => `${baseId}::${userId}`);
+  if (ids.length === 0) return;
+  const supabase = ensureSupabaseClient();
+  const { error } = await supabase
+    .from('notifications')
+    .update({ read: true })
+    .in('id', ids);
+  if (error && !isRowLevelSecurityError(error)) throw error;
+}
+
 async function hydrateStateFromSql() {
   const supabase = ensureSupabaseClient();
   const [profiles, ships, reports, incidents, sosAlerts, notifications] = await Promise.all([
@@ -253,7 +368,7 @@ async function hydrateStateFromSql() {
       incidentsData,
       incidentMeta,
       historyEntries: [],
-      notifications: (notifications.data || []).map(row => row.payload || row),
+      notifications: reconstructNotificationsFromRows(notifications.data || []),
       activeSOSAlert: activeSosRow?.payload || null,
       sosHistory: (sosAlerts.data || []).filter(row => row.status !== 'active').map(row => row.payload || row),
       shiftStatusRecords: {},
@@ -285,6 +400,7 @@ export function subscribeToCloudAppState(callback, onError) {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'sos_alerts' }, () => fetchState().catch(onError))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => fetchState().catch(onError))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'pending_registrations' }, () => fetchState().catch(onError))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => fetchState().catch(onError))
     .subscribe();
 
   return () => {

@@ -18,6 +18,8 @@ function getNotificationToneClass(type) {
   if (type === 'checkpoint_missed') return 'border-rose-500/30 bg-rose-500/10 text-rose-200';
   if (type === 'checkpoint_pending') return 'border-yellow-500/30 bg-yellow-500/10 text-yellow-200';
   if (type === 'registration_pending' || type === 'registration_rejected') return 'border-amber-500/30 bg-amber-500/10 text-amber-200';
+  if (type === 'checkpoint_pending_summary') return 'border-orange-500/30 bg-orange-500/10 text-orange-200';
+  if (type === 'shift_wrap_up') return 'border-indigo-500/30 bg-indigo-500/10 text-indigo-200';
   if (type?.startsWith('shift')) return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200';
   if (type === 'assignment_changed' || type === 'welcome_to_ship' || type === 'registration_approved') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200';
   return 'border-slate-700 bg-slate-900/70 text-slate-300';

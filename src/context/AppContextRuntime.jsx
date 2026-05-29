@@ -2948,6 +2948,7 @@ function normalizeNotificationRoute(notification = {}) {
   if (route === 'history' || route === 'history/list') return 'history/list';
   if (route === 'daily-report' && type === 'shift_wrap_up') return 'history/list';
   if (!route && type === 'checkpoint_pending') return 'patrol/checkpoint';
+  if (!route && type === 'checkpoint_pending_summary') return 'history/list';
   if (!route && type === 'shift_wrap_up') return 'history/list';
   if (!route && (type === 'incident_created' || type === 'incident_progress_updated')) return 'incidents/detail';
   return route || 'history/list';
@@ -2991,7 +2992,13 @@ function isShiftNotificationDebugEnabled() {
 }
 
 function isShiftNotificationType(type) {
-  return type === 'shift_started' || type === 'shift_ending_soon' || type === 'checkpoint_pending';
+  return (
+    type === 'shift_started'
+    || type === 'shift_ending_soon'
+    || type === 'checkpoint_pending'
+    || type === 'checkpoint_pending_summary'
+    || type === 'shift_wrap_up'
+  );
 }
 
 function logShiftNotificationDebug(event, payload) {

@@ -114,6 +114,11 @@ registerOutboxHandler('incident.delete', async ({ incidentId }) => {
   const { error } = await supabase.from(INCIDENTS_TABLE).delete().eq('id', incidentId);
   if (error) throw error;
 });
+registerOutboxHandler('sos_alert.delete', async ({ sosId }) => {
+  const supabase = ensureSupabaseClient();
+  const { error } = await supabase.from('sos_alerts').delete().eq('id', sosId);
+  if (error) throw error;
+});
 
 export function subscribeToIncidents(callback, onError) {
   const supabase = ensureSupabaseClient();
@@ -187,7 +192,10 @@ export async function deleteSosAlert(sosId) {
     if (error) throw error;
     return true;
   } catch (error) {
-    console.error('Gagal hapus sos_alert dari DB', { sosId, error });
+    await enqueueOutboxMutation({
+      type: 'sos_alert.delete',
+      payload: { sosId },
+    });
     return false;
   }
 }

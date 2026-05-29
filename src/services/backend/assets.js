@@ -136,4 +136,21 @@ export async function uploadRegistrationPhotoAsset({ uid, photoUrl }) {
   };
 }
 
+export async function deleteStorageAsset(photoUrl) {
+  if (!photoUrl || typeof photoUrl !== 'string') return;
+  // Ekstrak bucket dan object_path dari Supabase Storage URL
+  // Format: .../storage/v1/object/sign/<bucket>/<path>?token=... atau /public/<bucket>/<path>
+  const match = photoUrl.match(/\/storage\/v1\/object\/(?:sign|public)\/([^/?]+)\/(.+?)(?:\?|$)/);
+  if (!match) return;
+  const bucket = match[1];
+  const objectPath = match[2];
+
+  const supabase = ensureSupabaseClient();
+  await supabase.storage.from(bucket).remove([objectPath]).catch(() => {});
+  await supabase.from('media_assets').delete()
+    .eq('bucket', bucket)
+    .eq('object_path', objectPath)
+    .catch(() => {});
+}
+
 export { OPERATIONAL_BUCKET, REGISTRATION_BUCKET };

@@ -8,6 +8,7 @@ Side Effects: Membaca/menulis tabel patrol_reports dan mengantre mutation saat o
 
 import { ensureSupabaseClient } from './app';
 import { enqueueOutboxMutation, registerOutboxHandler } from './outbox';
+import { deleteStorageAsset } from './assets';
 
 const PATROL_REPORTS_TABLE = 'patrol_reports';
 const PATROL_REPORTS_SCHEMA_VERSION = 1;
@@ -166,6 +167,25 @@ export async function savePatrolReport(report, options = {}) {
         details: error?.details || null,
       },
     };
+  }
+}
+
+export async function deletePatrolReport({ checkpointId, shiftKey, shipId, photoUrl } = {}) {
+  if (!checkpointId || !shiftKey || !shipId) return false;
+  const supabase = ensureSupabaseClient();
+  try {
+    if (photoUrl) await deleteStorageAsset(photoUrl);
+    const { error } = await supabase
+      .from(PATROL_REPORTS_TABLE)
+      .delete()
+      .eq('checkpoint_id', checkpointId)
+      .eq('shift_key', shiftKey)
+      .eq('ship_id', shipId);
+    if (error) throw error;
+    return true;
+  } catch (error) {
+    console.error('Gagal hapus patrol_report dari DB', { checkpointId, shiftKey, shipId, error });
+    return false;
   }
 }
 

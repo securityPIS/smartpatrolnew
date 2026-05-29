@@ -47,11 +47,13 @@ import {
   uploadCloudDataUrlAsset,
 } from '../services/backend/cloudState';
 import {
+  deletePatrolReport,
   savePatrolReport,
   subscribeToPatrolReports,
 } from '../services/backend/patrolReports';
 import {
   deleteIncidentReport,
+  deleteSosAlert,
   saveIncidentReport,
   subscribeToIncidents,
 } from '../services/backend/incidentReports';
@@ -1114,6 +1116,8 @@ function createPatrolIncidentRecord(checkpoint, options = {}) {
     readOnly: readOnly || Boolean(checkpoint?.readOnly),
     completedAt: checkpoint?.completedAt || null,
     checkpointId: checkpoint?.id || null,
+    shiftKey: checkpoint?.shiftKey || null,
+    shipId: checkpoint?.shipId || null,
     gpsSnapshot: checkpoint?.gpsSnapshot || null,
     shipSnapshot: checkpoint?.shipSnapshot || null,
     ...extractTimeAuditFields(checkpoint),
@@ -9005,6 +9009,7 @@ export function AppProvider({ children }) {
               deleted: true,
             },
           }));
+          void deleteSosAlert(incidentId);
         } else if (incident.isPatrol) {
           let removedFromActiveShift = false;
 
@@ -9038,7 +9043,12 @@ export function AppProvider({ children }) {
               return nextMeta;
             });
           }
-          void deleteIncidentReport(incidentId);
+          void deletePatrolReport({
+            checkpointId: incident.checkpointId,
+            shiftKey: incident.shiftKey,
+            shipId: incident.shipId,
+            photoUrl: incident.photoUrl,
+          });
         } else {
           const deletedAt = new Date().toISOString();
           setDeletedRecords((previousDeletedRecords) => markDeletedRecord(previousDeletedRecords, 'incidents', incidentId, deletedAt));
@@ -9049,8 +9059,8 @@ export function AppProvider({ children }) {
             delete nextMeta[incidentId];
             return nextMeta;
           });
-          // Dual-write: hapus dokumen incident dari collection domain
-          void deleteIncidentReport(incidentId);
+          // Dual-write: hapus dokumen incident dari collection domain (beserta foto Storage)
+          void deleteIncidentReport(incidentId, incident.photoUrl);
         }
 
         setSelectedIncident((previousIncident) => (
@@ -9059,7 +9069,7 @@ export function AppProvider({ children }) {
         requestCloudSync('urgent');
       },
     });
-  }, [allIncidents, currentShiftMeta.key, deleteIncidentReport, isAdmin, requestCloudSync, selectedIncident]);
+  }, [allIncidents, currentShiftMeta.key, deleteIncidentReport, deletePatrolReport, deleteSosAlert, isAdmin, requestCloudSync, selectedIncident]);
   const handlePhotoProgress = useCallback(() => {
     setPendingPatrolCameraCapture({
       id: 'incident-progress',

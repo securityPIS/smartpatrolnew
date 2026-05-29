@@ -8,6 +8,7 @@ Side Effects: Membaca/menulis tabel incidents serta mengantre mutation offline b
 
 import { ensureSupabaseClient } from './app';
 import { enqueueOutboxMutation, registerOutboxHandler } from './outbox';
+import { deleteStorageAsset } from './assets';
 
 const INCIDENTS_TABLE = 'incidents';
 const INCIDENTS_SCHEMA_VERSION = 1;
@@ -162,9 +163,10 @@ export async function saveIncidentReport(incident, options = {}) {
   }
 }
 
-export async function deleteIncidentReport(incidentId) {
+export async function deleteIncidentReport(incidentId, photoUrl = null) {
   const supabase = ensureSupabaseClient();
   try {
+    if (photoUrl) await deleteStorageAsset(photoUrl);
     const { error } = await supabase.from(INCIDENTS_TABLE).delete().eq('id', incidentId);
     if (error) throw error;
     return true;
@@ -173,6 +175,19 @@ export async function deleteIncidentReport(incidentId) {
       type: 'incident.delete',
       payload: { incidentId },
     });
+    return false;
+  }
+}
+
+export async function deleteSosAlert(sosId) {
+  if (!sosId) return false;
+  const supabase = ensureSupabaseClient();
+  try {
+    const { error } = await supabase.from('sos_alerts').delete().eq('id', sosId);
+    if (error) throw error;
+    return true;
+  } catch (error) {
+    console.error('Gagal hapus sos_alert dari DB', { sosId, error });
     return false;
   }
 }

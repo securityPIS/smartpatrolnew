@@ -12,6 +12,12 @@ import { initializeApp, getApps } from 'firebase/app';
 import { getMessaging, getToken, isSupported, onMessage } from 'firebase/messaging';
 import { removePushSubscription, upsertPushSubscription } from '../backend/pushSubscriptions';
 
+// Catatan foreground: saat tab aktif, FCM tidak menampilkan notifikasi sistem dan memanggil
+// onMessage. Kita SENGAJA tidak menambahkan notifikasi ke inbox di sini karena Supabase
+// Realtime (subscribe tabel notifications) sudah mengirim baris yang sama; menambah lagi
+// akan terhitung sebagai notifikasi baru dan ter-persist ulang (duplikat). Web push berperan
+// utama saat tab/app TIDAK aktif — itu ditangani service worker di background.
+
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
@@ -30,23 +36,6 @@ function isPushConfigured() {
 
 function getFirebaseApp() {
   return getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
-}
-
-function mapPushPayloadToNotification(incoming = {}) {
-  const data = incoming.data || {};
-  const fallback = incoming.notification || {};
-  return {
-    type: data.type || 'push',
-    title: data.title || fallback.title || 'SmartPatrol',
-    body: data.body || fallback.body || '',
-    route: data.route || '',
-    incidentId: data.incidentId || '',
-    shipName: data.shipName || '',
-    shiftKey: data.shiftKey || '',
-    historyId: data.historyId || '',
-    senderName: data.senderName || 'SmartPatrol',
-    createdAt: data.createdAt || new Date().toISOString(),
-  };
 }
 
 export async function setupNativePushNotifications(profile, handlers = {}) {
@@ -85,9 +74,9 @@ export async function setupNativePushNotifications(profile, handlers = {}) {
       });
     }
 
-    const unsubscribeForeground = onMessage(messaging, (incoming) => {
-      handlers.onNotification?.(mapPushPayloadToNotification(incoming));
-    });
+    // Subscribe foreground hanya untuk mencegah warning SDK & membuka peluang debug.
+    // Tidak menambah ke inbox (lihat catatan di atas) — Realtime yang menangani.
+    const unsubscribeForeground = onMessage(messaging, () => { /* in-app via Realtime */ });
 
     return () => {
       try { unsubscribeForeground?.(); } catch { /* abaikan */ }

@@ -6,6 +6,11 @@
  * memang dirancang untuk dibundel di klien) — bukan kredensial rahasia. Service worker
  * tidak bisa membaca import.meta.env, jadi nilainya ditulis langsung di sini.
  * Versi compat harus selaras dengan dependency "firebase" di package.json.
+ *
+ * Pesan dari server (send-push) menyertakan webpush.notification + webpush.fcm_options.link,
+ * sehingga FCM SDK menampilkan notifikasi otomatis di background dan menangani klik
+ * (membuka link deep-link incidentId). Karena itu kita TIDAK menambah listener
+ * notificationclick sendiri agar tidak membuka tab dobel.
  */
 importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js');
@@ -21,8 +26,9 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// Pesan dari server menyertakan webpush.notification sehingga browser menampilkannya otomatis.
-// onBackgroundMessage hanya menampilkan manual untuk pesan data-only (jaga-jaga) agar tidak dobel.
+// Hanya dipakai untuk pesan data-only (tanpa notification payload) sebagai cadangan.
+// Pesan normal kita selalu membawa webpush.notification → ditampilkan otomatis oleh SDK,
+// sehingga handler ini early-return agar notifikasi tidak tampil dobel.
 messaging.onBackgroundMessage((payload) => {
   if (payload && payload.notification) return;
   const data = (payload && payload.data) || {};
@@ -33,26 +39,4 @@ messaging.onBackgroundMessage((payload) => {
     tag: data.type || 'smartpatrol',
     data,
   });
-});
-
-// Klik notifikasi: fokuskan tab yang ada atau buka baru, dengan deep-link incidentId bila ada.
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close();
-  const data = event.notification.data || {};
-  const incidentId = data.incidentId || data.FCM_MSG?.data?.incidentId || '';
-  const targetUrl = incidentId ? `/?incidentId=${encodeURIComponent(incidentId)}` : '/';
-
-  event.waitUntil((async () => {
-    const allClients = await clients.matchAll({ type: 'window', includeUncontrolled: true });
-    for (const client of allClients) {
-      if ('focus' in client) {
-        if ('navigate' in client) {
-          try { await client.navigate(targetUrl); } catch (_) { /* abaikan */ }
-        }
-        return client.focus();
-      }
-    }
-    if (clients.openWindow) return clients.openWindow(targetUrl);
-    return undefined;
-  })());
 });

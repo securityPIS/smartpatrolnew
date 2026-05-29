@@ -20,6 +20,11 @@ jobs:
       SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      # Web push (FCM). FCM_SERVICE_ACCOUNT = isi penuh JSON service account Firebase.
+      # APP_URL = URL aplikasi produksi (deep-link klik notifikasi). Keduanya opsional:
+      # bila FCM_SERVICE_ACCOUNT kosong, langkah web push dilewati tanpa menggagalkan deploy.
+      FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
+      APP_URL: ${{ secrets.APP_URL }}
 
     steps:
       - name: Checkout repo
@@ -49,6 +54,21 @@ jobs:
 
       - name: Set edge function secret (CRON_SECRET)
         run: supabase secrets set CRON_SECRET="$CRON_SECRET"
+
+      - name: Set edge function secret web push (FCM_SERVICE_ACCOUNT, APP_URL)
+        if: ${{ env.FCM_SERVICE_ACCOUNT != '' }}
+        run: |
+          # Padatkan JSON ke satu baris (escaping aman) agar bisa di-set sebagai secret.
+          compact=$(printf '%s' "$FCM_SERVICE_ACCOUNT" | jq -c .)
+          supabase secrets set FCM_SERVICE_ACCOUNT="$compact"
+          if [ -n "$APP_URL" ]; then
+            supabase secrets set APP_URL="$APP_URL"
+          fi
+
+      - name: Deploy edge function send-push
+        if: ${{ env.FCM_SERVICE_ACCOUNT != '' }}
+        # --no-verify-jwt: dipanggil trigger DB via pg_net dengan header x-cron-secret, bukan JWT user.
+        run: supabase functions deploy send-push --no-verify-jwt
 
       - name: Deploy edge function approve-pending-registration
         run: supabase functions deploy approve-pending-registration

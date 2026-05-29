@@ -353,3 +353,16 @@ Perbaikan (migration `202605300005_fix_notification_cron_from_custom_checkpoints
 
 Regresi dijaga `tests/pages/notification-cron-source.test.mjs` (memastikan kedua fungsi
 membaca `custom_checkpoints`, tidak lagi `ship_checkpoints`, dan match-by-name tersedia).
+
+**Status: TERVERIFIKASI di produksi (2026-05-29). Notifikasi cron (checkpoint pending,
+checkpoint pending summary, shift wrap-up) kembali masuk di in-app maupun push.**
+
+> ⚠️ ATURAN UNTUK FUNGSI/CRON SQL APA PUN YANG MENYANGKUT CHECKPOINT:
+> JANGAN PERNAH membaca dari tabel `ship_checkpoints` — tabel itu **selalu kosong** di
+> produksi (tidak ada satu pun jalur tulis di `src/`/`scripts/`). Sumber kebenaran definisi
+> titik patroli adalah `ships.custom_checkpoints` (JSONB). Iterasi dengan
+> `jsonb_array_elements(custom_checkpoints) with ordinality`, total =
+> `jsonb_array_length(custom_checkpoints)`, dan cocokkan ke `patrol_reports` TERUTAMA via
+> nama checkpoint ternormalisasi (fallback id runtime `${shipId}::slug::${index}`). Pola
+> salah `from ship_checkpoints` sudah dua kali jadi bug senyap (`finalize_shift` → 202605290002,
+> cron notifikasi → 202605300005); jangan ulangi.

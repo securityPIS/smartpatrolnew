@@ -28,6 +28,7 @@
     "@capacitor/geolocation": "^8.2.0",
     "@capacitor/network": "^8.0.1",
     "@supabase/supabase-js": "^2.86.0",
+    "firebase": "^10.14.1",
     "lucide-react": "^1.7.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"

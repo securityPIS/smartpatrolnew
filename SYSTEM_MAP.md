@@ -322,3 +322,34 @@ server, bukan kegagalan jaringan transien. Regresi dijaga `tests/security/auth-a
 ("resolusi akses sembuh sendiri setelah reconnect").
 
 **Status: TERVERIFIKASI di device (2026-05-29). Checkpoint kembali otomatis tanpa refresh manual.**
+
+## Notifikasi Cron Tidak Pernah Muncul (checkpoint pending / wrap-up) (bug fix)
+
+Gejala: notifikasi cronjob — `checkpoint_pending`, `checkpoint_pending_summary`, dan
+`shift_wrap_up` — TIDAK pernah muncul. Bukan hanya push yang gagal; di in-app notif pun
+tidak ada satu pun baris yang masuk.
+
+Akar masalah (regresi dari kelas bug yang sama dengan `finalize_shift`): fungsi
+`notify_checkpoint_pending` dan `notify_shift_wrapup` (migration `202605300002`)
+mengiterasi kapal lewat `where exists (select 1 from ship_checkpoints sc where
+sc.ship_id = s.id and sc.active = true)`. Padahal tabel `ship_checkpoints` TIDAK pernah
+ditulis klien — definisi titik patroli disimpan di `ships.custom_checkpoints` (JSONB).
+Akibatnya loop kapal mencocokkan NOL baris → body loop tak pernah jalan → `v_admin_lines`
+tetap kosong → TIDAK ADA `insert` ke `public.notifications`. Karena tak ada baris notif
+yang masuk, trigger `dispatch_push_for_notification` pun tak pernah terpicu (jadi push
+ikut hilang). Bug ini sudah pernah diperbaiki untuk `finalize_shift` di `202605290002`,
+tetapi cron notifikasi (dibuat sehari setelahnya) memakai ulang pola lama yang salah.
+
+Perbaikan (migration `202605300005_fix_notification_cron_from_custom_checkpoints.sql`,
+`replace` kedua fungsi — jadwal cron tidak diubah):
+- iterasi kapal lewat `ships.custom_checkpoints` (array non-kosong), bukan
+  `ship_checkpoints`;
+- total checkpoint = `jsonb_array_length(custom_checkpoints)`;
+- `notify_checkpoint_pending`: hitung pending per elemen JSONB (`jsonb_array_elements ...
+  with ordinality`), cocokkan laporan `completed` TERUTAMA via nama checkpoint
+  ternormalisasi (lower + whitespace tunggal), fallback id runtime `${shipId}::slug::index`;
+- `notify_shift_wrapup`: tetap baca `shift_history_entries` lebih dulu; fallback hitung
+  total dari `custom_checkpoints` (missed di-clamp `greatest(0, ...)`).
+
+Regresi dijaga `tests/pages/notification-cron-source.test.mjs` (memastikan kedua fungsi
+membaca `custom_checkpoints`, tidak lagi `ship_checkpoints`, dan match-by-name tersedia).

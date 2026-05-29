@@ -98,3 +98,38 @@ muncul tapi push tidak, periksa berurutan:
 
 5. **Logs.** Lihat Postgres logs untuk `[send-push]` (notice dari trigger) dan
    Edge Function logs `send-push` di dashboard Supabase untuk respons FCM.
+
+## Playbook diagnosis cepat (terbukti, 2026-05-29)
+
+Urutan ini berhasil menemukan & menyelesaikan kasus "in-app masuk tapi push tidak muncul".
+Ikuti **berurutan** — tiap langkah mempersempit titik gagal.
+
+1. **Pastikan tes dengan cara benar.** App target harus di **background / layar terkunci /
+   tab tertutup**. Saat app aktif di depan, push banner memang tidak ditampilkan (by-design).
+
+2. **Cek konfigurasi DB** (SQL Editor): `select key, left(value,40) from private.app_config;`
+   → harus ada `functions_url` & `cron_secret`. Kosong → jalankan workflow Deploy Supabase.
+
+3. **Cek token** (SQL Editor): `select user_id, left(fcm_token,12) from public.push_subscriptions;`
+   → harus ada baris untuk user target.
+
+4. **Cek secret** (Supabase → Edge Functions → Secrets): `CRON_SECRET`, `FCM_SERVICE_ACCOUNT`,
+   `APP_URL` ada; dan function `send-push` muncul di tab Functions (status deployed).
+
+5. **PALING PENTING — baca Logs `send-push`.** Trigger 1 notifikasi, lalu buka
+   Edge Functions → `send-push` → **Logs**. Cari baris `[send-push] ...`:
+   - Tidak ada baris `[send-push]` sama sekali → fungsi belum di-deploy ulang (cek
+     "X minutes ago" di header; harus baru). Jalankan Deploy Supabase.
+   - `request diterima` lalu `token ditemukan { tokenCount: 0 }` → token target tidak ada (langkah 3).
+   - `pengiriman gagal (rejected) { reason: "FCM_SERVICE_ACCOUNT bukan JSON valid." }`
+     → **inilah akar masalah yang kemarin terjadi.** Secret JSON service account
+     rusak/terpotong. **Solusi yang berhasil:** download ulang file JSON di
+     Firebase Console (Project Settings → Service accounts → Generate new private key),
+     copy **seluruh** isi (dari `{` sampai `}`), set ulang `FCM_SERVICE_ACCOUNT`, re-deploy.
+   - `selesai { sent: 1 }` → ✅ terkirim ke FCM. Jika HP tetap tak terima → masalah di
+     sisi device (izin notifikasi OS, battery saver mematikan browser).
+   - `unauthorized` → `CRON_SECRET` ≠ `private.app_config.cron_secret`.
+
+> Kunci yang membuat diagnosis ini bisa dilakukan: `send-push` & `_shared/fcm.ts`
+> menulis log detail di tiap tahap dan menangkap pesan error FCM. Jangan menebak —
+> selalu mulai dari **Logs `send-push`**.

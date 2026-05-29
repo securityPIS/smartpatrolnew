@@ -117,6 +117,8 @@ export interface FcmSendResult {
   ok: boolean;
   status: number;
   shouldRemove: boolean;
+  // Ringkasan error dari FCM bila gagal (untuk diagnosis di log send-push).
+  detail?: string;
 }
 
 // Kirim satu pesan ke satu token. message harus mengikuti format FCM v1
@@ -140,13 +142,18 @@ export async function sendToToken(
 
   // Token mati/dicabut → tandai untuk dihapus dari push_subscriptions.
   let shouldRemove = false;
-  if (response.status === 404) {
-    shouldRemove = true;
-  } else if (response.status === 400) {
-    const detail = await response.clone().json().catch(() => null);
-    const errorStatus = detail?.error?.details?.[0]?.errorCode || detail?.error?.status || '';
-    if (String(errorStatus).includes('UNREGISTERED') || String(errorStatus).includes('INVALID_ARGUMENT')) {
+  let detail: string | undefined;
+  if (!response.ok) {
+    // Ambil body error sekali saja untuk diagnosis (status + isi pesan FCM).
+    const errorText = await response.text().catch(() => '');
+    detail = errorText ? errorText.slice(0, 500) : undefined;
+    if (response.status === 404) {
       shouldRemove = true;
+    } else if (response.status === 400) {
+      const upper = String(errorText).toUpperCase();
+      if (upper.includes('UNREGISTERED') || upper.includes('INVALID_ARGUMENT')) {
+        shouldRemove = true;
+      }
     }
   }
 
@@ -155,5 +162,6 @@ export async function sendToToken(
     ok: response.ok,
     status: response.status,
     shouldRemove,
+    detail,
   };
 }

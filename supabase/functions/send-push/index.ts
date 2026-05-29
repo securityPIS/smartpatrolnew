@@ -31,18 +31,26 @@ Deno.serve(async (request) => {
     const expectedSecret = Deno.env.get('CRON_SECRET') || '';
     const providedSecret = request.headers.get('x-cron-secret') || '';
     if (!expectedSecret || providedSecret !== expectedSecret) {
+      console.error('[send-push] unauthorized: x-cron-secret tidak cocok / CRON_SECRET belum di-set.', {
+        hasExpected: Boolean(expectedSecret),
+        hasProvided: Boolean(providedSecret),
+      });
       return jsonResponse({ error: 'unauthorized' }, 401);
     }
 
     const body = await readJsonBody(request);
     const userId = sanitize(body.userId, 160);
-    if (!userId) return jsonResponse({ error: 'userId-required' }, 400);
+    if (!userId) {
+      console.error('[send-push] userId kosong di body request.');
+      return jsonResponse({ error: 'userId-required' }, 400);
+    }
 
     const type = sanitize(body.type, 80) || 'general';
     const title = sanitize(body.title, 120) || 'SmartPatrol';
     const messageBody = sanitize(body.body, 240);
     const shipName = sanitize(body.shipName, 100);
     const payload = (body.payload && typeof body.payload === 'object') ? body.payload : {};
+    console.log('[send-push] request diterima', { userId, type, title });
 
     const supabase = getServiceClient();
     const { data: subscriptions, error } = await supabase
@@ -52,7 +60,9 @@ Deno.serve(async (request) => {
     if (error) throw error;
 
     const tokens = (subscriptions || []).map((row) => row.fcm_token).filter(Boolean);
+    console.log('[send-push] token ditemukan', { userId, tokenCount: tokens.length });
     if (tokens.length === 0) {
+      console.warn('[send-push] tidak ada token untuk user ini — push dilewati.', { userId });
       return jsonResponse({ ok: true, sent: 0, reason: 'no-tokens' });
     }
 
@@ -93,8 +103,21 @@ Deno.serve(async (request) => {
     let sent = 0;
     results.forEach((result) => {
       if (result.status === 'fulfilled') {
-        if (result.value.ok) sent += 1;
+        if (result.value.ok) {
+          sent += 1;
+        } else {
+          // Token tidak ok: log status + detail dari FCM agar penyebab gagal terlihat.
+          console.error('[send-push] FCM menolak token', {
+            status: result.value.status,
+            detail: result.value.detail,
+          });
+        }
         if (result.value.shouldRemove) tokensToRemove.push(result.value.token);
+      } else {
+        // Promise reject (mis. gagal ambil access token / JSON service account invalid).
+        console.error('[send-push] pengiriman gagal (rejected)', {
+          reason: result.reason instanceof Error ? result.reason.message : String(result.reason),
+        });
       }
     });
 
@@ -102,9 +125,11 @@ Deno.serve(async (request) => {
       await supabase.from('push_subscriptions').delete().in('fcm_token', tokensToRemove);
     }
 
+    console.log('[send-push] selesai', { sent, total: tokens.length, removed: tokensToRemove.length });
     return jsonResponse({ ok: true, sent, total: tokens.length, removed: tokensToRemove.length });
   } catch (error) {
     const messageText = error instanceof Error ? error.message : 'send-push failed';
+    console.error('[send-push] error fatal', { message: messageText });
     return jsonResponse({ error: messageText }, 500);
   }
 });

@@ -58,9 +58,15 @@ jobs:
       - name: Set edge function secret web push (FCM_SERVICE_ACCOUNT, APP_URL)
         if: ${{ env.FCM_SERVICE_ACCOUNT != '' }}
         run: |
-          # Padatkan JSON ke satu baris (escaping aman) agar bisa di-set sebagai secret.
-          compact=$(printf '%s' "$FCM_SERVICE_ACCOUNT" | jq -c .)
-          supabase secrets set FCM_SERVICE_ACCOUNT="$compact"
+          # Coba padatkan JSON ke satu baris; jika jq gagal parse, kirim as-is.
+          # Kegagalan jq biasanya berarti secret bukan JSON valid — edge function
+          # akan tetap di-deploy tapi mungkin gagal saat runtime; periksa isi secret.
+          if compact=$(printf '%s' "$FCM_SERVICE_ACCOUNT" | jq -c . 2>/dev/null); then
+            supabase secrets set FCM_SERVICE_ACCOUNT="$compact"
+          else
+            echo "::warning::FCM_SERVICE_ACCOUNT gagal di-parse oleh jq (bukan JSON valid?). Mengirim as-is — periksa isi secret di GitHub (harus berisi file JSON service account Firebase lengkap)."
+            supabase secrets set FCM_SERVICE_ACCOUNT="$FCM_SERVICE_ACCOUNT"
+          fi
           if [ -n "$APP_URL" ]; then
             supabase secrets set APP_URL="$APP_URL"
           fi

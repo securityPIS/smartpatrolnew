@@ -13,12 +13,13 @@ import { ArrowLeft, Bell, CheckCheck } from 'lucide-react';
 const APP_TIME_ZONE = 'Asia/Jakarta';
 
 function getNotificationToneClass(type) {
+  if (type === 'sos' || type?.startsWith('sos')) return 'border-rose-500/40 bg-rose-500/15 text-rose-200';
   if (type?.startsWith('incident')) return 'border-yellow-500/30 bg-yellow-500/10 text-yellow-200';
   if (type === 'checkpoint_missed') return 'border-rose-500/30 bg-rose-500/10 text-rose-200';
   if (type === 'checkpoint_pending') return 'border-yellow-500/30 bg-yellow-500/10 text-yellow-200';
-  if (type === 'registration_pending') return 'border-amber-500/30 bg-amber-500/10 text-amber-200';
+  if (type === 'registration_pending' || type === 'registration_rejected') return 'border-amber-500/30 bg-amber-500/10 text-amber-200';
   if (type?.startsWith('shift')) return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200';
-  if (type === 'assignment_changed') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200';
+  if (type === 'assignment_changed' || type === 'welcome_to_ship' || type === 'registration_approved') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200';
   return 'border-slate-700 bg-slate-900/70 text-slate-300';
 }
 

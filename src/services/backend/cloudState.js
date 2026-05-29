@@ -215,11 +215,19 @@ function deriveNotificationTone(type = '') {
   return 'info';
 }
 
+// Id stabil lintas-client untuk satu notifikasi logis. Pakai dedupeKey bila ada agar
+// notifikasi yang sama yang dibuat oleh beberapa device (mis. shift_started dari banyak
+// petugas, registration_pending dari banyak admin) bertabrakan di baris DB yang sama
+// (ON CONFLICT DO NOTHING) alih-alih menghasilkan duplikat di inbox penerima.
+export function getNotificationCloudBaseId(record = {}) {
+  return sanitizeText(record?.dedupeKey || record?.id || '', 200);
+}
+
 // Mengubah satu notifikasi frontend (banyak penerima) menjadi banyak baris DB fan-out
 // (satu baris per penerima). target_user_id terisi agar RLS notifications_read_target
 // dan status baca per-user bekerja natural, sekaligus siap untuk push notification.
 function notificationRecordToRows(record = {}) {
-  const baseId = sanitizeText(record.id || '', 200);
+  const baseId = getNotificationCloudBaseId(record);
   if (!baseId) return [];
   const targetUserIds = Array.from(new Set(
     (Array.isArray(record.targetUserIds) ? record.targetUserIds : []).filter(Boolean),

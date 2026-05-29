@@ -24,19 +24,22 @@ create table if not exists public.patrol_report_tombstones (
 
 alter table public.patrol_report_tombstones enable row level security;
 
--- Admin boleh kelola tombstone; semua authenticated boleh baca (agar klien bisa
--- menyaring secara defensif bila perlu). Trigger memakai security definer sehingga
--- tetap berfungsi untuk penulis non-admin (petugas) yang tidak punya akses tulis.
+-- Admin boleh kelola tombstone. Trigger memakai security definer sehingga tetap
+-- berfungsi untuk penulis non-admin (petugas) yang tidak punya akses tulis/baca —
+-- klien TIDAK perlu membaca tabel ini agar trigger jalan.
 drop policy if exists "patrol_tombstones_admin_write" on public.patrol_report_tombstones;
 create policy "patrol_tombstones_admin_write" on public.patrol_report_tombstones
 for all to authenticated
 using (public.is_admin())
 with check (public.is_admin());
 
+-- Baca dibatasi seperti patrol_reports: admin, atau pengguna yang ditugaskan ke
+-- kapal terkait. Tanpa pembatasan ini, PETUGAS/PIC satu kapal bisa enumerasi
+-- metadata penghapusan (shift_key/ship_id/checkpoint_id) seluruh armada.
 drop policy if exists "patrol_tombstones_read" on public.patrol_report_tombstones;
 create policy "patrol_tombstones_read" on public.patrol_report_tombstones
 for select to authenticated
-using (true);
+using (public.is_admin() or public.can_access_ship_name(ship_name));
 
 -- Trigger: tolak insert/update patrol_reports yang sudah di-tombstone.
 -- RETURN NULL pada BEFORE INSERT/UPDATE membatalkan baris tersebut tanpa error,

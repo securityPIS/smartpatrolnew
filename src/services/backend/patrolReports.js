@@ -178,55 +178,70 @@ const PATROL_REPORT_TOMBSTONES_TABLE = 'patrol_report_tombstones';
 // Strategi pencocokan dibuat lunak: utamakan id baris (firestoreId) yang pasti; bila
 // tidak ada, cocokkan via ship_id + checkpoint_id (+ shift_key bila tersedia). Setiap
 // baris yang cocok di-tombstone via client_event_id-nya SENDIRI (dibaca dari DB), foto
-// di Storage dihapus, lalu barisnya dihapus.
-export async function deletePatrolReport({ firestoreId, checkpointId, shiftKey, shipId } = {}) {
+// di Storage dihapus, lalu barisnya dihapus. Melempar error agar bisa diantre ulang.
+async function performPatrolReportDelete({ firestoreId, checkpointId, shiftKey, shipId } = {}) {
   const supabase = ensureSupabaseClient();
+  let query = supabase
+    .from(PATROL_REPORTS_TABLE)
+    .select('id, client_event_id, shift_key, ship_id, checkpoint_id, ship_name, photo_url');
+
+  if (firestoreId) {
+    query = query.eq('id', firestoreId);
+  } else if (shipId && checkpointId) {
+    query = query.eq('ship_id', shipId).eq('checkpoint_id', checkpointId);
+    if (shiftKey) query = query.eq('shift_key', shiftKey);
+  } else {
+    return; // kriteria tidak cukup, tidak ada yang bisa dihapus
+  }
+
+  const { data: rows, error: selectError } = await query;
+  if (selectError) throw selectError;
+  if (!rows || rows.length === 0) return; // tidak ada baris = sudah bersih
+
+  const tombstones = rows
+    .filter((row) => row.client_event_id)
+    .map((row) => ({
+      client_event_id: row.client_event_id,
+      shift_key: row.shift_key || null,
+      ship_id: row.ship_id || null,
+      checkpoint_id: row.checkpoint_id || null,
+      ship_name: row.ship_name || null,
+    }));
+  if (tombstones.length > 0) {
+    const { error: tombstoneError } = await supabase
+      .from(PATROL_REPORT_TOMBSTONES_TABLE)
+      .upsert(tombstones, { onConflict: 'client_event_id' });
+    if (tombstoneError) throw tombstoneError;
+  }
+
+  for (const row of rows) {
+    if (row.photo_url) await deleteStorageAsset(row.photo_url);
+  }
+
+  const { error: deleteError } = await supabase
+    .from(PATROL_REPORTS_TABLE)
+    .delete()
+    .in('id', rows.map((row) => row.id));
+  if (deleteError) throw deleteError;
+}
+
+registerOutboxHandler('patrol_report.delete', performPatrolReportDelete);
+
+export async function deletePatrolReport(criteria = {}) {
   try {
-    let query = supabase
-      .from(PATROL_REPORTS_TABLE)
-      .select('id, client_event_id, shift_key, ship_id, checkpoint_id, ship_name, photo_url');
-
-    if (firestoreId) {
-      query = query.eq('id', firestoreId);
-    } else if (shipId && checkpointId) {
-      query = query.eq('ship_id', shipId).eq('checkpoint_id', checkpointId);
-      if (shiftKey) query = query.eq('shift_key', shiftKey);
-    } else {
-      return false;
-    }
-
-    const { data: rows, error: selectError } = await query;
-    if (selectError) throw selectError;
-    if (!rows || rows.length === 0) return true; // tidak ada baris = sudah bersih
-
-    const tombstones = rows
-      .filter((row) => row.client_event_id)
-      .map((row) => ({
-        client_event_id: row.client_event_id,
-        shift_key: row.shift_key || null,
-        ship_id: row.ship_id || null,
-        checkpoint_id: row.checkpoint_id || null,
-        ship_name: row.ship_name || null,
-      }));
-    if (tombstones.length > 0) {
-      const { error: tombstoneError } = await supabase
-        .from(PATROL_REPORT_TOMBSTONES_TABLE)
-        .upsert(tombstones, { onConflict: 'client_event_id' });
-      if (tombstoneError) throw tombstoneError;
-    }
-
-    for (const row of rows) {
-      if (row.photo_url) await deleteStorageAsset(row.photo_url);
-    }
-
-    const { error: deleteError } = await supabase
-      .from(PATROL_REPORTS_TABLE)
-      .delete()
-      .in('id', rows.map((row) => row.id));
-    if (deleteError) throw deleteError;
+    await performPatrolReportDelete(criteria);
     return true;
   } catch (error) {
-    console.error('Gagal hapus patrol_report dari DB', { firestoreId, checkpointId, shiftKey, shipId, error });
+    // Gagal transien (offline/jaringan/RLS): antre ke outbox agar dicoba ulang saat
+    // online. Tanpa ini, hapus offline tidak pernah ditegakkan dan temuan dapat
+    // dihidupkan kembali oleh hydrate/re-upsert — regresi yang justru ingin dicegah.
+    // Id deterministik agar hapus berulang untuk laporan yang sama tidak menumpuk.
+    console.error('Gagal hapus patrol_report dari DB, mengantre ke outbox', { ...criteria, error });
+    await enqueueOutboxMutation({
+      id: `patrol-delete-${criteria.firestoreId || `${criteria.shipId || 'ship'}|${criteria.shiftKey || 'shift'}|${criteria.checkpointId || 'cp'}`}`,
+      type: 'patrol_report.delete',
+      payload: criteria,
+    });
     return false;
   }
 }

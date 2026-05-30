@@ -300,8 +300,21 @@ export function subscribeToPatrolReportTombstones(callback, onError) {
     })
     .subscribe();
 
+  // Fallback polling: realtime Supabase bisa gagal/terputus ("Realtime signal Supabase
+  // gagal"). Tanpa fallback, device petugas yang SUDAH terbuka tidak pernah menerima
+  // event INSERT tombstone — temuan yang dihapus admin tetap tampil sampai app di-reload.
+  // Poll ulang daftar tombstone secara berkala memastikan penghapusan tetap dipropagasi
+  // dalam beberapa detik walau realtime mati. fetchRows idempotent (reset checkpoint yang
+  // sudah pending = no-op), jadi aman dipanggil berulang.
+  const POLL_INTERVAL_MS = 15000;
+  const pollTimer = setInterval(() => {
+    if (disposed) return;
+    fetchRows().catch(onError);
+  }, POLL_INTERVAL_MS);
+
   return () => {
     disposed = true;
+    clearInterval(pollTimer);
     supabase.removeChannel(channel);
   };
 }

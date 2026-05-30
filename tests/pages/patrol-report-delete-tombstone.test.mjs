@@ -90,6 +90,22 @@ test('tombstone realtime membawa deleted_at untuk reset stale beda shift', () =>
   );
 });
 
+test('listener tombstone punya polling fallback saat realtime gagal', () => {
+  const startIndex = patrolReportsSource.indexOf('export function subscribeToPatrolReportTombstones');
+  assert.notEqual(startIndex, -1, 'fungsi subscribe tombstone harus ada');
+  const fnSlice = patrolReportsSource.slice(startIndex, startIndex + 3000);
+  assert.match(
+    fnSlice,
+    /setInterval\(/,
+    'tombstone harus di-poll ulang berkala agar device petugas yang sudah terbuka tetap menerima penghapusan walau realtime mati',
+  );
+  assert.match(
+    fnSlice,
+    /clearInterval\(pollTimer\)/,
+    'timer polling tombstone harus dibersihkan saat unsubscribe',
+  );
+});
+
 test('migration memblokir re-upsert temuan stale walau shift_key berbeda', () => {
   assert.match(
     migrationSource,

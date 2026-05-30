@@ -175,70 +175,88 @@ const PATROL_REPORT_TOMBSTONES_TABLE = 'patrol_report_tombstones';
 // Hapus permanen temuan/laporan patroli + tombstone agar tidak dihidupkan kembali
 // oleh re-upsert idempotent dari device lain (lihat migration 202605300007/202605300008).
 //
-// Dua-kunci & SELALU-tombstone: trigger DB memblokir penulisan ulang baik via
-// client_event_id maupun natural key (shift_key+ship_id+checkpoint_id). Karena
-// checkpoint hasil hydrate cloudState TIDAK membawa firestoreId, dan client_event_id
-// re-upsert bisa berbeda dari yang tersimpan, kita SELALU menulis tombstone berbasis
-// natural key dari kriteria — walau baris tidak ditemukan di SELECT — sehingga
-// re-upsert dari device manapun tetap diblokir.
+// AKAR MASALAH "temuan dihapus admin balik lagi": versi lama menyaring SELECT & DELETE
+// dengan shift_key yang DIBAWA incident (client). shift_key itu bisa kosong/basi, sedangkan
+// baris DB memakai shift_key shift ASAL temuan (mis. '2026-05-27|shift-2-active'). Saat
+// keduanya beda, .eq('shift_key', ...) menghasilkan 0 baris -> DELETE tidak menghapus apa
+// pun -> temuan muncul lagi setiap hydrate. Tombstone pun tertulis dengan shift_key salah
+// sehingga trigger tidak memblokir re-upsert.
+//
+// Perbaikan: JANGAN percaya shift_key dari client. Cari baris lewat firestoreId dan/atau
+// (ship_id+checkpoint_id) TANPA filter shift_key, ambil shift_key ASLI dari baris DB,
+// lalu tombstone + DELETE memakai shift_key asli itu.
 async function performPatrolReportDelete({ firestoreId, checkpointId, shiftKey, shipId, shipName } = {}) {
   const supabase = ensureSupabaseClient();
   const hasNaturalKey = Boolean(shipId && checkpointId);
 
-  if (!firestoreId && !hasNaturalKey) return; // kriteria tidak cukup
+  if (!firestoreId && !hasNaturalKey) return;
 
-  // SELECT via natural key jika tersedia — menangkap semua baris yang cocok termasuk
-  // baris yang disisipkan ulang oleh device lain setelah SELECT pertama (race condition).
-  // Jika natural key tidak tersedia, fallback ke firestoreId.
-  let query = supabase
-    .from(PATROL_REPORTS_TABLE)
-    .select('id, client_event_id, shift_key, ship_id, checkpoint_id, ship_name, photo_url');
+  const selectColumns = 'id, client_event_id, shift_key, ship_id, checkpoint_id, ship_name, photo_url';
+  const foundRows = [];
+  const seenIds = new Set();
+  const collectRows = (rows) => (rows || []).forEach((row) => {
+    if (row?.id != null && !seenIds.has(row.id)) { seenIds.add(row.id); foundRows.push(row); }
+  });
 
+  // Cari tanpa filter shift_key agar shift_key ASLI dari DB bisa dipakai.
   if (hasNaturalKey) {
-    query = query.eq('ship_id', shipId).eq('checkpoint_id', checkpointId);
-    if (shiftKey) query = query.eq('shift_key', shiftKey);
-  } else {
-    query = query.eq('id', firestoreId);
+    const { data, error } = await supabase
+      .from(PATROL_REPORTS_TABLE).select(selectColumns)
+      .eq('ship_id', shipId).eq('checkpoint_id', checkpointId);
+    if (error) throw error;
+    collectRows(data);
+  }
+  if (firestoreId) {
+    const { data, error } = await supabase
+      .from(PATROL_REPORTS_TABLE).select(selectColumns).eq('id', firestoreId);
+    if (error) throw error;
+    collectRows(data);
   }
 
-  const { data: rows, error: selectError } = await query;
-  if (selectError) throw selectError;
+  // shift_key otoritatif: ambil dari baris DB (bukan dari client).
+  const firestoreRow = firestoreId ? foundRows.find((r) => String(r.id) === String(firestoreId)) : null;
+  const targetShiftKey = firestoreRow?.shift_key ?? shiftKey ?? null;
 
-  // ship_name WAJIB terisi di tombstone agar petugas (RLS can_access_ship_name) bisa
-  // membaca tombstone dan mereset checkpoint lokal. Ambil dari kriteria, atau dari baris
-  // yang ditemukan bila kriteria tidak membawanya.
-  const resolvedShipName = shipName || (rows || []).find((row) => row.ship_name)?.ship_name || null;
+  // Baris yang akan dihapus: cocok firestoreId ATAU (natural-key + shift target).
+  const rowsToDelete = foundRows.filter((row) => {
+    if (firestoreId && String(row.id) === String(firestoreId)) return true;
+    if (!hasNaturalKey) return false;
+    if (String(row.ship_id) !== String(shipId) || String(row.checkpoint_id) !== String(checkpointId)) return false;
+    return targetShiftKey == null || (row.shift_key ?? null) === targetShiftKey;
+  });
 
-  // Tombstone dari natural key kriteria — SELALU dibuat (anti-resurrection walau
-  // SELECT meleset). client_event_id dibentuk identik dengan createClientEventId
-  // agar cocok dengan nilai yang dipakai re-upsert.
+  const resolvedShipName = shipName
+    || rowsToDelete.find((r) => r.ship_name)?.ship_name
+    || foundRows.find((r) => r.ship_name)?.ship_name
+    || null;
+
+  // Tombstone memakai shift_key ASLI dari DB agar trigger mencocokkan natural key.
   const tombstoneMap = new Map();
+  const addTombstone = (entry) => { if (entry.client_event_id) tombstoneMap.set(entry.client_event_id, entry); };
+  rowsToDelete.forEach((row) => {
+    addTombstone({
+      client_event_id: row.client_event_id
+        || createClientEventId({ shiftKey: row.shift_key, shipId: row.ship_id, checkpointId: row.checkpoint_id }),
+      shift_key: row.shift_key ?? null,
+      ship_id: row.ship_id ?? null,
+      checkpoint_id: row.checkpoint_id ?? null,
+      ship_name: row.ship_name || resolvedShipName,
+    });
+  });
+  // Tombstone anti-resurrection: natural-key + shift_key asli, walau SELECT meleset.
   if (hasNaturalKey) {
-    const naturalEventId = createClientEventId({ shiftKey, shipId, checkpointId });
-    tombstoneMap.set(naturalEventId, {
-      client_event_id: naturalEventId,
-      shift_key: shiftKey || null,
+    addTombstone({
+      client_event_id: createClientEventId({ shiftKey: targetShiftKey, shipId, checkpointId }),
+      shift_key: targetShiftKey,
       ship_id: shipId,
       checkpoint_id: checkpointId,
       ship_name: resolvedShipName,
     });
   }
-  // Tombstone dari setiap baris yang benar-benar ada (client_event_id aslinya).
-  (rows || []).forEach((row) => {
-    if (!row.client_event_id) return;
-    tombstoneMap.set(row.client_event_id, {
-      client_event_id: row.client_event_id,
-      shift_key: row.shift_key || null,
-      ship_id: row.ship_id || null,
-      checkpoint_id: row.checkpoint_id || null,
-      ship_name: row.ship_name || resolvedShipName,
-    });
-  });
 
-  // [DIAGNOSTIK] Lihat console saat menghapus untuk mengetahui di lapisan mana penghapusan
-  // gagal. Hapus blok log ini setelah akar masalah ditemukan.
-  console.info('[hapus-temuan] kriteria', { firestoreId, checkpointId, shiftKey, shipId, shipName, hasNaturalKey });
-  console.info('[hapus-temuan] baris ditemukan di patrol_reports (SELECT):', (rows || []).length, rows);
+  console.info('[hapus-temuan] kriteria', { firestoreId, checkpointId, shiftKey, shipId, hasNaturalKey });
+  console.info('[hapus-temuan] baris ditemukan (tanpa filter shift):', foundRows.length, foundRows);
+  console.info('[hapus-temuan] shift_key target (dari DB):', targetShiftKey, '| baris dihapus:', rowsToDelete.length);
 
   if (tombstoneMap.size > 0) {
     const { data: tombstoneData, error: tombstoneError } = await supabase
@@ -251,45 +269,34 @@ async function performPatrolReportDelete({ firestoreId, checkpointId, shiftKey, 
     }
     console.info('[hapus-temuan] tombstone tertulis:', (tombstoneData || []).length, tombstoneData);
   } else {
-    console.warn('[hapus-temuan] TIDAK ada tombstone ditulis (kriteria natural key kosong).');
+    console.warn('[hapus-temuan] TIDAK ada tombstone ditulis.');
   }
 
-  // Hapus foto baris yang ditemukan di SELECT.
-  for (const row of (rows || [])) {
+  for (const row of rowsToDelete) {
     if (row.photo_url) await deleteStorageAsset(row.photo_url);
   }
 
-  // Hapus via natural key jika tersedia — menangkap baris baru yang disisipkan ulang
-  // setelah SELECT di atas (race condition lintas-device). Jika natural key tidak ada,
-  // hapus by UUID. .select() agar tahu BERAPA baris benar-benar terhapus (0 = RLS blokir
-  // atau baris tidak ada).
+  let totalDeleted = 0;
+  if (rowsToDelete.length > 0) {
+    const { data: deletedById, error: errById } = await supabase
+      .from(PATROL_REPORTS_TABLE).delete()
+      .in('id', rowsToDelete.map((r) => r.id)).select();
+    if (errById) { console.error('[hapus-temuan] GAGAL delete (by id):', errById); throw errById; }
+    totalDeleted += (deletedById || []).length;
+  }
+  // Tangkap baris yang disisipkan ulang setelah SELECT (race condition lintas-device).
   if (hasNaturalKey) {
-    let deleteQuery = supabase
-      .from(PATROL_REPORTS_TABLE)
-      .delete()
-      .eq('ship_id', shipId)
-      .eq('checkpoint_id', checkpointId);
-    if (shiftKey) deleteQuery = deleteQuery.eq('shift_key', shiftKey);
-    const { data: deletedRows, error: deleteError } = await deleteQuery.select();
-    if (deleteError) {
-      console.error('[hapus-temuan] GAGAL delete patrol_reports (natural key):', deleteError);
-      throw deleteError;
-    }
-    console.info('[hapus-temuan] baris patrol_reports TERHAPUS (natural key):', (deletedRows || []).length, deletedRows);
-    if ((deletedRows || []).length === 0) {
-      console.warn('[hapus-temuan] 0 baris terhapus — kemungkinan RLS is_admin() menolak DELETE, atau baris sudah tidak ada. Cek diagnostik SQL.');
-    }
-  } else if (rows && rows.length > 0) {
-    const { data: deletedRows, error: deleteError } = await supabase
-      .from(PATROL_REPORTS_TABLE)
-      .delete()
-      .in('id', rows.map((row) => row.id))
-      .select();
-    if (deleteError) {
-      console.error('[hapus-temuan] GAGAL delete patrol_reports (by id):', deleteError);
-      throw deleteError;
-    }
-    console.info('[hapus-temuan] baris patrol_reports TERHAPUS (by id):', (deletedRows || []).length, deletedRows);
+    let q = supabase.from(PATROL_REPORTS_TABLE).delete()
+      .eq('ship_id', shipId).eq('checkpoint_id', checkpointId);
+    if (targetShiftKey != null) q = q.eq('shift_key', targetShiftKey);
+    const { data: deletedByKey, error: errByKey } = await q.select();
+    if (errByKey) { console.error('[hapus-temuan] GAGAL delete (natural key):', errByKey); throw errByKey; }
+    totalDeleted += (deletedByKey || []).length;
+  }
+
+  console.info('[hapus-temuan] TOTAL baris terhapus:', totalDeleted);
+  if (totalDeleted === 0 && foundRows.length > 0) {
+    console.warn('[hapus-temuan] 0 terhapus padahal baris ditemukan — RLS is_admin() mungkin menolak DELETE. Periksa profil admin.');
   }
 }
 

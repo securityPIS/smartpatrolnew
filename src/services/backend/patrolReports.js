@@ -181,7 +181,7 @@ const PATROL_REPORT_TOMBSTONES_TABLE = 'patrol_report_tombstones';
 // re-upsert bisa berbeda dari yang tersimpan, kita SELALU menulis tombstone berbasis
 // natural key dari kriteria — walau baris tidak ditemukan di SELECT — sehingga
 // re-upsert dari device manapun tetap diblokir.
-async function performPatrolReportDelete({ firestoreId, checkpointId, shiftKey, shipId } = {}) {
+async function performPatrolReportDelete({ firestoreId, checkpointId, shiftKey, shipId, shipName } = {}) {
   const supabase = ensureSupabaseClient();
   const hasNaturalKey = Boolean(shipId && checkpointId);
 
@@ -204,6 +204,11 @@ async function performPatrolReportDelete({ firestoreId, checkpointId, shiftKey, 
   const { data: rows, error: selectError } = await query;
   if (selectError) throw selectError;
 
+  // ship_name WAJIB terisi di tombstone agar petugas (RLS can_access_ship_name) bisa
+  // membaca tombstone dan mereset checkpoint lokal. Ambil dari kriteria, atau dari baris
+  // yang ditemukan bila kriteria tidak membawanya.
+  const resolvedShipName = shipName || (rows || []).find((row) => row.ship_name)?.ship_name || null;
+
   // Tombstone dari natural key kriteria — SELALU dibuat (anti-resurrection walau
   // SELECT meleset). client_event_id dibentuk identik dengan createClientEventId
   // agar cocok dengan nilai yang dipakai re-upsert.
@@ -215,7 +220,7 @@ async function performPatrolReportDelete({ firestoreId, checkpointId, shiftKey, 
       shift_key: shiftKey || null,
       ship_id: shipId,
       checkpoint_id: checkpointId,
-      ship_name: null,
+      ship_name: resolvedShipName,
     });
   }
   // Tombstone dari setiap baris yang benar-benar ada (client_event_id aslinya).
@@ -226,7 +231,7 @@ async function performPatrolReportDelete({ firestoreId, checkpointId, shiftKey, 
       shift_key: row.shift_key || null,
       ship_id: row.ship_id || null,
       checkpoint_id: row.checkpoint_id || null,
-      ship_name: row.ship_name || null,
+      ship_name: row.ship_name || resolvedShipName,
     });
   });
 
@@ -282,6 +287,57 @@ export async function deletePatrolReport(criteria = {}) {
     });
     return false;
   }
+}
+
+// Berlangganan tombstone temuan/laporan patroli untuk PROPAGASI PENGHAPUSAN lintas-device.
+//
+// Akar masalah "temuan dihapus admin masih terlihat di device petugas": realtime
+// patrol_reports + mergePatrolReportDocumentsIntoCheckpoints hanya MERGE/ADD baris yang
+// masih ada — tidak pernah MENGHAPUS checkpoint lokal saat barisnya dihapus admin.
+// Device petugas memegang checkpoint 'completed' (temuan) di state lokal selamanya.
+//
+// Solusi: device petugas berlangganan patrol_report_tombstones (RLS mengizinkan baca
+// untuk kapal yang ditugaskan, asalkan ship_name terisi). Saat tombstone muncul, klien
+// mereset checkpoint lokal yang cocok (ship_id + checkpoint_id) menjadi pending sehingga
+// temuan hilang dari daftar. Trigger DB sudah mencegah re-upsert menghidupkannya lagi.
+export function subscribeToPatrolReportTombstones(callback, onError) {
+  const supabase = ensureSupabaseClient();
+  let disposed = false;
+
+  const fetchRows = async () => {
+    const { data, error } = await supabase
+      .from(PATROL_REPORT_TOMBSTONES_TABLE)
+      .select('client_event_id, shift_key, ship_id, checkpoint_id, ship_name')
+      .order('deleted_at', { ascending: false })
+      .limit(500);
+    if (error) throw error;
+    if (!disposed) {
+      callback((data || []).map((row) => ({
+        clientEventId: row.client_event_id,
+        shiftKey: row.shift_key || null,
+        shipId: row.ship_id || null,
+        checkpointId: row.checkpoint_id || null,
+        shipName: row.ship_name || null,
+      })));
+    }
+  };
+
+  fetchRows().catch(onError);
+
+  const channel = supabase.channel('patrol-report-tombstones')
+    .on('postgres_changes', {
+      event: 'INSERT',
+      schema: 'public',
+      table: PATROL_REPORT_TOMBSTONES_TABLE,
+    }, () => {
+      fetchRows().catch(onError);
+    })
+    .subscribe();
+
+  return () => {
+    disposed = true;
+    supabase.removeChannel(channel);
+  };
 }
 
 export { PATROL_REPORTS_SCHEMA_VERSION };

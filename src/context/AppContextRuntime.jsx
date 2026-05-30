@@ -50,6 +50,7 @@ import {
   deletePatrolReport,
   savePatrolReport,
   subscribeToPatrolReports,
+  subscribeToPatrolReportTombstones,
 } from '../services/backend/patrolReports';
 import {
   deleteIncidentReport,
@@ -6561,6 +6562,51 @@ export function AppProvider({ children }) {
       reportsWithLocalMedia,
     ));
   }, []);
+  // Propagasi penghapusan temuan lintas-device: untuk setiap tombstone, reset checkpoint
+  // lokal yang cocok (ship_id + checkpoint_id) menjadi pending agar temuan yang sudah
+  // dihapus admin hilang dari daftar device petugas. Trigger DB mencegah re-upsert
+  // menghidupkannya lagi. Bila tombstone membawa shiftKey, batasi reset hanya untuk
+  // checkpoint di shift yang sama — agar checkpoint yang sah di-patrol ulang pada shift
+  // berikutnya tidak ikut terhapus.
+  const applyPatrolReportTombstones = useCallback((tombstones = []) => {
+    if (!Array.isArray(tombstones) || tombstones.length === 0) return;
+    setCheckpointsByShip((previousState) => {
+      let didChange = false;
+      const nextState = { ...(previousState || {}) };
+
+      tombstones.forEach((tombstone) => {
+        const shipId = tombstone?.shipId;
+        const checkpointId = tombstone?.checkpointId;
+        if (!shipId || !checkpointId) return;
+
+        const shipCheckpoints = ensureArray(nextState[shipId]);
+        let shipChanged = false;
+        const nextShipCheckpoints = shipCheckpoints.map((checkpoint) => {
+          const matchesCheckpoint = String(checkpoint?.id) === String(checkpointId)
+            || String(checkpoint?.checkpointId || '') === String(checkpointId);
+          if (!matchesCheckpoint) return checkpoint;
+          // Hanya reset bila benar-benar temuan/laporan yang masih hidup secara lokal.
+          if (checkpoint?.status !== 'completed') return checkpoint;
+          // Bila tombstone punya shiftKey, jangan sentuh checkpoint dari shift berbeda.
+          if (tombstone.shiftKey && String(checkpoint?.shiftKey || '') !== String(tombstone.shiftKey)) {
+            return checkpoint;
+          }
+          shipChanged = true;
+          return resetCheckpointForShift(checkpoint, {
+            shiftKey: checkpoint?.shiftKey || tombstone.shiftKey || null,
+            pendingOrigin: 'manual-reset',
+          });
+        });
+
+        if (shipChanged) {
+          nextState[shipId] = nextShipCheckpoints;
+          didChange = true;
+        }
+      });
+
+      return didChange ? nextState : previousState;
+    });
+  }, []);
   const getUsersByRole = useCallback((roles) => (
     usersData.filter(user => roles.includes(user.role)).map(user => user.id)
   ), [usersData]);
@@ -9042,6 +9088,7 @@ export function AppProvider({ children }) {
             checkpointId: incident.checkpointId,
             shiftKey: incident.shiftKey,
             shipId: incident.shipId,
+            shipName: incident.shipName,
           });
         } else {
           const deletedAt = new Date().toISOString();
@@ -9451,6 +9498,20 @@ export function AppProvider({ children }) {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
   }, [applyPatrolReportDocuments, currentShiftMeta.key, hasOperationalCloudAccess, patrolReportSubscriptionTargets]);
+  useEffect(() => {
+    if (!isCloudSyncEnabled || !hasOperationalCloudAccess) return () => { };
+
+    const unsubscribe = subscribeToPatrolReportTombstones(
+      applyPatrolReportTombstones,
+      (error) => {
+        console.error('Gagal subscribe tombstone laporan patroli', error);
+      },
+    );
+
+    return () => {
+      unsubscribe();
+    };
+  }, [applyPatrolReportTombstones, hasOperationalCloudAccess]);
   useEffect(() => {
     if (!isCloudSyncEnabled || !hasOperationalCloudAccess) return () => { };
 

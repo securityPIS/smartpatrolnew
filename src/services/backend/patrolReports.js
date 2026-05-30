@@ -235,11 +235,23 @@ async function performPatrolReportDelete({ firestoreId, checkpointId, shiftKey, 
     });
   });
 
+  // [DIAGNOSTIK] Lihat console saat menghapus untuk mengetahui di lapisan mana penghapusan
+  // gagal. Hapus blok log ini setelah akar masalah ditemukan.
+  console.info('[hapus-temuan] kriteria', { firestoreId, checkpointId, shiftKey, shipId, shipName, hasNaturalKey });
+  console.info('[hapus-temuan] baris ditemukan di patrol_reports (SELECT):', (rows || []).length, rows);
+
   if (tombstoneMap.size > 0) {
-    const { error: tombstoneError } = await supabase
+    const { data: tombstoneData, error: tombstoneError } = await supabase
       .from(PATROL_REPORT_TOMBSTONES_TABLE)
-      .upsert(Array.from(tombstoneMap.values()), { onConflict: 'client_event_id' });
-    if (tombstoneError) throw tombstoneError;
+      .upsert(Array.from(tombstoneMap.values()), { onConflict: 'client_event_id' })
+      .select();
+    if (tombstoneError) {
+      console.error('[hapus-temuan] GAGAL tulis tombstone:', tombstoneError);
+      throw tombstoneError;
+    }
+    console.info('[hapus-temuan] tombstone tertulis:', (tombstoneData || []).length, tombstoneData);
+  } else {
+    console.warn('[hapus-temuan] TIDAK ada tombstone ditulis (kriteria natural key kosong).');
   }
 
   // Hapus foto baris yang ditemukan di SELECT.
@@ -249,7 +261,8 @@ async function performPatrolReportDelete({ firestoreId, checkpointId, shiftKey, 
 
   // Hapus via natural key jika tersedia — menangkap baris baru yang disisipkan ulang
   // setelah SELECT di atas (race condition lintas-device). Jika natural key tidak ada,
-  // hapus by UUID.
+  // hapus by UUID. .select() agar tahu BERAPA baris benar-benar terhapus (0 = RLS blokir
+  // atau baris tidak ada).
   if (hasNaturalKey) {
     let deleteQuery = supabase
       .from(PATROL_REPORTS_TABLE)
@@ -257,14 +270,26 @@ async function performPatrolReportDelete({ firestoreId, checkpointId, shiftKey, 
       .eq('ship_id', shipId)
       .eq('checkpoint_id', checkpointId);
     if (shiftKey) deleteQuery = deleteQuery.eq('shift_key', shiftKey);
-    const { error: deleteError } = await deleteQuery;
-    if (deleteError) throw deleteError;
+    const { data: deletedRows, error: deleteError } = await deleteQuery.select();
+    if (deleteError) {
+      console.error('[hapus-temuan] GAGAL delete patrol_reports (natural key):', deleteError);
+      throw deleteError;
+    }
+    console.info('[hapus-temuan] baris patrol_reports TERHAPUS (natural key):', (deletedRows || []).length, deletedRows);
+    if ((deletedRows || []).length === 0) {
+      console.warn('[hapus-temuan] 0 baris terhapus — kemungkinan RLS is_admin() menolak DELETE, atau baris sudah tidak ada. Cek diagnostik SQL.');
+    }
   } else if (rows && rows.length > 0) {
-    const { error: deleteError } = await supabase
+    const { data: deletedRows, error: deleteError } = await supabase
       .from(PATROL_REPORTS_TABLE)
       .delete()
-      .in('id', rows.map((row) => row.id));
-    if (deleteError) throw deleteError;
+      .in('id', rows.map((row) => row.id))
+      .select();
+    if (deleteError) {
+      console.error('[hapus-temuan] GAGAL delete patrol_reports (by id):', deleteError);
+      throw deleteError;
+    }
+    console.info('[hapus-temuan] baris patrol_reports TERHAPUS (by id):', (deletedRows || []).length, deletedRows);
   }
 }
 

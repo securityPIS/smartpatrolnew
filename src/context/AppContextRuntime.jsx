@@ -9018,7 +9018,7 @@ export function AppProvider({ children }) {
               shipCheckpoints.map((checkpoint) => {
                 if (createPatrolIncidentId(checkpoint) !== incidentId) return checkpoint;
                 return resetCheckpointForShift(checkpoint, {
-                  shiftKey: currentShiftMeta.key,
+                  shiftKey: incident.shiftKey || currentShiftMeta.key,
                   pendingOrigin: 'manual-reset',
                 });
               }),

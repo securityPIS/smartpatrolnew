@@ -183,18 +183,22 @@ const PATROL_REPORT_TOMBSTONES_TABLE = 'patrol_report_tombstones';
 // re-upsert dari device manapun tetap diblokir.
 async function performPatrolReportDelete({ firestoreId, checkpointId, shiftKey, shipId } = {}) {
   const supabase = ensureSupabaseClient();
+  const hasNaturalKey = Boolean(shipId && checkpointId);
 
+  if (!firestoreId && !hasNaturalKey) return; // kriteria tidak cukup
+
+  // SELECT via natural key jika tersedia — menangkap semua baris yang cocok termasuk
+  // baris yang disisipkan ulang oleh device lain setelah SELECT pertama (race condition).
+  // Jika natural key tidak tersedia, fallback ke firestoreId.
   let query = supabase
     .from(PATROL_REPORTS_TABLE)
     .select('id, client_event_id, shift_key, ship_id, checkpoint_id, ship_name, photo_url');
 
-  if (firestoreId) {
-    query = query.eq('id', firestoreId);
-  } else if (shipId && checkpointId) {
+  if (hasNaturalKey) {
     query = query.eq('ship_id', shipId).eq('checkpoint_id', checkpointId);
     if (shiftKey) query = query.eq('shift_key', shiftKey);
   } else {
-    return; // kriteria tidak cukup
+    query = query.eq('id', firestoreId);
   }
 
   const { data: rows, error: selectError } = await query;
@@ -204,7 +208,7 @@ async function performPatrolReportDelete({ firestoreId, checkpointId, shiftKey, 
   // SELECT meleset). client_event_id dibentuk identik dengan createClientEventId
   // agar cocok dengan nilai yang dipakai re-upsert.
   const tombstoneMap = new Map();
-  if (shipId && checkpointId) {
+  if (hasNaturalKey) {
     const naturalEventId = createClientEventId({ shiftKey, shipId, checkpointId });
     tombstoneMap.set(naturalEventId, {
       client_event_id: naturalEventId,
@@ -233,10 +237,24 @@ async function performPatrolReportDelete({ firestoreId, checkpointId, shiftKey, 
     if (tombstoneError) throw tombstoneError;
   }
 
-  if (rows && rows.length > 0) {
-    for (const row of rows) {
-      if (row.photo_url) await deleteStorageAsset(row.photo_url);
-    }
+  // Hapus foto baris yang ditemukan di SELECT.
+  for (const row of (rows || [])) {
+    if (row.photo_url) await deleteStorageAsset(row.photo_url);
+  }
+
+  // Hapus via natural key jika tersedia — menangkap baris baru yang disisipkan ulang
+  // setelah SELECT di atas (race condition lintas-device). Jika natural key tidak ada,
+  // hapus by UUID.
+  if (hasNaturalKey) {
+    let deleteQuery = supabase
+      .from(PATROL_REPORTS_TABLE)
+      .delete()
+      .eq('ship_id', shipId)
+      .eq('checkpoint_id', checkpointId);
+    if (shiftKey) deleteQuery = deleteQuery.eq('shift_key', shiftKey);
+    const { error: deleteError } = await deleteQuery;
+    if (deleteError) throw deleteError;
+  } else if (rows && rows.length > 0) {
     const { error: deleteError } = await supabase
       .from(PATROL_REPORTS_TABLE)
       .delete()

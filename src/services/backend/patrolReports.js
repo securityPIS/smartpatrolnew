@@ -258,6 +258,11 @@ async function performPatrolReportDelete({ firestoreId, checkpointId, shiftKey, 
   console.info('[hapus-temuan] baris ditemukan (tanpa filter shift):', foundRows.length, foundRows);
   console.info('[hapus-temuan] shift_key target (dari DB):', targetShiftKey, '| baris dihapus:', rowsToDelete.length);
 
+  // [DIAGNOSTIK] Lihat console saat menghapus untuk mengetahui di lapisan mana penghapusan
+  // gagal. Hapus blok log ini setelah akar masalah ditemukan.
+  console.info('[hapus-temuan] kriteria', { firestoreId, checkpointId, shiftKey, shipId, shipName, hasNaturalKey });
+  console.info('[hapus-temuan] baris ditemukan di patrol_reports (SELECT):', (rows || []).length, rows);
+
   if (tombstoneMap.size > 0) {
     const { data: tombstoneData, error: tombstoneError } = await supabase
       .from(PATROL_REPORT_TOMBSTONES_TABLE)

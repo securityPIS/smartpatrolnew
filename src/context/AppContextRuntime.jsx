@@ -4099,6 +4099,23 @@ function createPatrolReportDomainRecord(checkpoint = {}, options = {}) {
     : typeof checkpoint.photoUrl === 'string'
       ? checkpoint.photoUrl
       : null;
+  // Varian resolusi (hero 500px / thumb 64px) ikut dibawa di record domain agar
+  // round-trip lewat payload patrol_reports dan device lain bisa memuat foto kecil.
+  // Override options dipakai saat pending (di-strip lokal → null) dan ready (URL https).
+  const heroUrl = typeof options.heroUrl === 'string'
+    ? options.heroUrl
+    : Object.prototype.hasOwnProperty.call(options, 'heroUrl')
+      ? options.heroUrl
+      : typeof checkpoint.heroUrl === 'string'
+        ? checkpoint.heroUrl
+        : null;
+  const thumbUrl = typeof options.thumbUrl === 'string'
+    ? options.thumbUrl
+    : Object.prototype.hasOwnProperty.call(options, 'thumbUrl')
+      ? options.thumbUrl
+      : typeof checkpoint.thumbUrl === 'string'
+        ? checkpoint.thumbUrl
+        : null;
   const galleryPhotos = Array.isArray(options.galleryPhotos)
     ? options.galleryPhotos
     : ensureArray(checkpoint.galleryPhotos);
@@ -4117,12 +4134,18 @@ function createPatrolReportDomainRecord(checkpoint = {}, options = {}) {
     photoUrl,
     galleryPhotos,
   });
-  const normalizedGalleryPhotos = ensureArray(normalizedCheckpoint.galleryPhotos).map((galleryPhoto) => (
-    compactMediaAuditRecordForCloudSync({
+  const normalizedGalleryPhotos = ensureArray(normalizedCheckpoint.galleryPhotos).map((galleryPhoto) => {
+    const compacted = compactMediaAuditRecordForCloudSync({
       ...galleryPhoto,
       photoUrl: typeof galleryPhoto?.photoUrl === 'string' ? galleryPhoto.photoUrl : null,
-    })
-  ));
+    });
+    // Pertahankan key varian (termasuk idb:// lokal) di record domain perantara ini agar
+    // uploadPatrolReportDomainMedia bisa mengunggahnya. pending/ready menormalkan ke
+    // null/https sebelum benar-benar ditulis ke cloud, jadi idb:// tak pernah bocor.
+    if (typeof galleryPhoto?.heroUrl === 'string') compacted.heroUrl = galleryPhoto.heroUrl;
+    if (typeof galleryPhoto?.thumbUrl === 'string') compacted.thumbUrl = galleryPhoto.thumbUrl;
+    return compacted;
+  });
 
   return {
     checkpointId,
@@ -4146,6 +4169,8 @@ function createPatrolReportDomainRecord(checkpoint = {}, options = {}) {
     updatedAt: typeof checkpoint.updatedAt === 'string' ? checkpoint.updatedAt : null,
     resultType: sanitizeText(checkpoint.resultType || '', 20) || null,
     photoUrl,
+    heroUrl,
+    thumbUrl,
     galleryPhotos: normalizedGalleryPhotos,
     mediaStatus,
     kejadian: sanitizeMultilineText(checkpoint.kejadian || '', 320),
@@ -5870,6 +5895,26 @@ export function AppProvider({ children }) {
           ),
         }));
       }
+      // Foto utama insiden lintas-device lewat blob shared-state: naikkan juga varian
+      // hero/thumb agar device lain memuat foto kecil, bukan foto penuh 1600px.
+      if (isLocalOnlyAssetUrl(incident?.heroUrl) && incident.heroUrl !== incPhotoUrl) {
+        uploadTasks.push(async () => ({
+          heroUrl: await prepareCloudPhotoUrl(
+            incident.heroUrl,
+            ['incidents', incident.id, 'hero', incident.heroUrl],
+            { skipUpload: false },
+          ),
+        }));
+      }
+      if (isLocalOnlyAssetUrl(incident?.thumbUrl) && incident.thumbUrl !== incPhotoUrl) {
+        uploadTasks.push(async () => ({
+          thumbUrl: await prepareCloudPhotoUrl(
+            incident.thumbUrl,
+            ['incidents', incident.id, 'thumb', incident.thumbUrl],
+            { skipUpload: false },
+          ),
+        }));
+      }
     });
 
     (boundedStateSnapshot.shipsData || []).forEach((ship) => {
@@ -5945,10 +5990,26 @@ export function AppProvider({ children }) {
       photoUrl: cloudAssetCacheRef.current.get(user?.photoUrl) || stripLocalAssetUrlSync(user?.photoUrl) || null,
     }));
 
-    const preparedIncidentsData = (boundedStateSnapshot.incidentsData || []).map((incident) => compactIncidentRecordForCloudSync({
-      ...incident,
-      photoUrl: cloudAssetCacheRef.current.get(incident?.photoUrl) || stripLocalAssetUrlSync(incident?.photoUrl) || null,
-    }));
+    const preparedIncidentsData = (boundedStateSnapshot.incidentsData || []).map((incident) => {
+      const cloudPhotoUrl = cloudAssetCacheRef.current.get(incident?.photoUrl) || stripLocalAssetUrlSync(incident?.photoUrl) || null;
+      // Varian: pakai URL https hasil upload bila ada; kalau varian sama dengan foto penuh
+      // (fallback) atau belum terupload, ikut foto penuh. idb:// yang tersisa di-strip → null
+      // dan compact membiarkannya null (device lain fallback ke foto penuh).
+      const cloudHeroUrl = cloudAssetCacheRef.current.get(incident?.heroUrl)
+        || (incident?.heroUrl === incident?.photoUrl ? cloudPhotoUrl : null)
+        || stripLocalAssetUrlSync(incident?.heroUrl)
+        || cloudPhotoUrl;
+      const cloudThumbUrl = cloudAssetCacheRef.current.get(incident?.thumbUrl)
+        || (incident?.thumbUrl === incident?.photoUrl ? cloudPhotoUrl : null)
+        || stripLocalAssetUrlSync(incident?.thumbUrl)
+        || cloudPhotoUrl;
+      return compactIncidentRecordForCloudSync({
+        ...incident,
+        photoUrl: cloudPhotoUrl,
+        heroUrl: cloudHeroUrl,
+        thumbUrl: cloudThumbUrl,
+      });
+    });
 
     const preparedHistoryEntries = (boundedStateSnapshot.historyEntries || []).map((entry) => compactHistoryEntryForCloudSync({
       ...entry,
@@ -6029,6 +6090,14 @@ export function AppProvider({ children }) {
       });
     }
   }, []);
+  // Unggah satu varian (hero/thumb) ke Storage bila masih lokal (idb://). Varian yang sudah
+  // https diteruskan apa adanya; yang null/absen dikembalikan null. prepareCloudPhotoUrl
+  // meng-cache per-URL, jadi varian yang kebetulan sama dengan foto penuh tidak diunggah dua kali.
+  const prepareCloudVariantUrl = useCallback(async (variantUrl, pathSegments) => {
+    if (!variantUrl || typeof variantUrl !== 'string') return null;
+    if (!isLocalOnlyAssetUrl(variantUrl)) return variantUrl;
+    return prepareCloudPhotoUrl(variantUrl, [...pathSegments, variantUrl]);
+  }, [prepareCloudPhotoUrl]);
   const uploadPatrolReportDomainMedia = useCallback(async (checkpointReport, galleryPhotos = []) => (
     Promise.all([
       isLocalOnlyAssetUrl(checkpointReport.photoUrl)
@@ -6045,9 +6114,25 @@ export function AppProvider({ children }) {
             ['patrol-reports-gallery', checkpointReport.shipId, checkpointReport.shiftKey, checkpointReport.checkpointId, galleryPhoto.id || galleryIndex, galleryPhoto.photoUrl],
           )
           : galleryPhoto?.photoUrl || null,
+        heroUrl: await prepareCloudVariantUrl(
+          galleryPhoto?.heroUrl,
+          ['patrol-reports-gallery', checkpointReport.shipId, checkpointReport.shiftKey, checkpointReport.checkpointId, galleryPhoto.id || galleryIndex, 'hero'],
+        ),
+        thumbUrl: await prepareCloudVariantUrl(
+          galleryPhoto?.thumbUrl,
+          ['patrol-reports-gallery', checkpointReport.shipId, checkpointReport.shiftKey, checkpointReport.checkpointId, galleryPhoto.id || galleryIndex, 'thumb'],
+        ),
       }))),
+      prepareCloudVariantUrl(
+        checkpointReport.heroUrl,
+        ['patrol-reports', checkpointReport.shipId, checkpointReport.shiftKey, checkpointReport.checkpointId, 'hero'],
+      ),
+      prepareCloudVariantUrl(
+        checkpointReport.thumbUrl,
+        ['patrol-reports', checkpointReport.shipId, checkpointReport.shiftKey, checkpointReport.checkpointId, 'thumb'],
+      ),
     ])
-  ), [prepareCloudPhotoUrl]);
+  ), [prepareCloudPhotoUrl, prepareCloudVariantUrl]);
   const syncPatrolReportToDomain = useCallback(async (checkpoint, options = {}) => {
     // JANGAN bail saat isOffline. savePatrolReport adalah SATU-SATUNYA jalur yang menulis
     // tabel patrol_reports (requestCloudSync hanya sinkron profiles/ships). Bila kita berhenti
@@ -6084,9 +6169,15 @@ export function AppProvider({ children }) {
     }
     const pendingReport = createPatrolReportDomainRecord(checkpointReport, {
       photoUrl: hasLocalMedia ? stripLocalAssetUrlSync(checkpointReport.photoUrl) : checkpointReport.photoUrl,
+      // Varian lokal selalu di-strip → null saat pending agar idb:// tidak bocor ke cloud
+      // (hero/thumb tidak ikut cek hasLocalMedia); URL https menyusul di readyReport.
+      heroUrl: stripLocalAssetUrlSync(checkpointReport.heroUrl),
+      thumbUrl: stripLocalAssetUrlSync(checkpointReport.thumbUrl),
       galleryPhotos: galleryPhotos.map((galleryPhoto) => ({
         ...galleryPhoto,
         photoUrl: hasLocalMedia ? stripLocalAssetUrlSync(galleryPhoto?.photoUrl) : galleryPhoto?.photoUrl || null,
+        heroUrl: stripLocalAssetUrlSync(galleryPhoto?.heroUrl),
+        thumbUrl: stripLocalAssetUrlSync(galleryPhoto?.thumbUrl),
       })),
       mediaStatus: hasLocalMedia ? 'uploading' : checkpointReport.mediaStatus,
     });
@@ -6120,7 +6211,7 @@ export function AppProvider({ children }) {
 
     patrolReportDomainUploadInFlightRef.current.add(reportKey);
     try {
-      const [uploadedPhotoUrl, uploadedGalleryPhotos] = await uploadPatrolReportDomainMedia(
+      const [uploadedPhotoUrl, uploadedGalleryPhotos, uploadedHeroUrl, uploadedThumbUrl] = await uploadPatrolReportDomainMedia(
         checkpointReport,
         galleryPhotos,
       );
@@ -6128,6 +6219,8 @@ export function AppProvider({ children }) {
         || uploadedGalleryPhotos.some((galleryPhoto) => Boolean(galleryPhoto?.photoUrl));
       const readyReport = createPatrolReportDomainRecord(checkpointReport, {
         photoUrl: uploadedPhotoUrl || null,
+        heroUrl: uploadedHeroUrl || null,
+        thumbUrl: uploadedThumbUrl || null,
         galleryPhotos: uploadedGalleryPhotos,
         mediaStatus: mediaReady ? 'ready' : 'failed',
       });
@@ -6168,7 +6261,7 @@ export function AppProvider({ children }) {
 
     patrolReportDomainUploadInFlightRef.current.add(reportKey);
     try {
-      const [uploadedPhotoUrl, uploadedGalleryPhotos] = await uploadPatrolReportDomainMedia(
+      const [uploadedPhotoUrl, uploadedGalleryPhotos, uploadedHeroUrl, uploadedThumbUrl] = await uploadPatrolReportDomainMedia(
         checkpointReport,
         galleryPhotos,
       );
@@ -6178,6 +6271,8 @@ export function AppProvider({ children }) {
 
       const readyReport = createPatrolReportDomainRecord(checkpointReport, {
         photoUrl: uploadedPhotoUrl || null,
+        heroUrl: uploadedHeroUrl || null,
+        thumbUrl: uploadedThumbUrl || null,
         galleryPhotos: uploadedGalleryPhotos,
         mediaStatus: 'ready',
       });
@@ -6203,6 +6298,8 @@ export function AppProvider({ children }) {
           return {
             ...shipCheckpoint,
             photoUrl: readyReport.photoUrl,
+            heroUrl: readyReport.heroUrl || shipCheckpoint.heroUrl,
+            thumbUrl: readyReport.thumbUrl || shipCheckpoint.thumbUrl,
             galleryPhotos: readyReport.galleryPhotos,
             mediaStatus: readyReport.mediaStatus,
           };
@@ -6992,10 +7089,11 @@ export function AppProvider({ children }) {
     const startedAtMs = performance.now();
 
     try {
+      const mediaPathRoot = mediaGroup === 'documentation' ? 'incident-documentation' : 'incident-progress';
       const uploadedUrl = await prepareCloudPhotoUrl(
         safePhotoUrl,
         [
-          mediaGroup === 'documentation' ? 'incident-documentation' : 'incident-progress',
+          mediaPathRoot,
           safeIncidentId,
           itemKey,
           safePhotoUrl,
@@ -7004,9 +7102,17 @@ export function AppProvider({ children }) {
 
       if (!uploadedUrl || isLocalOnlyAssetUrl(uploadedUrl)) return false;
 
+      // Naikkan juga varian hero/thumb agar device lain memuat foto kecil, bukan foto penuh.
+      const [uploadedHeroUrl, uploadedThumbUrl] = await Promise.all([
+        prepareCloudVariantUrl(item?.heroUrl, [mediaPathRoot, safeIncidentId, itemKey, 'hero']),
+        prepareCloudVariantUrl(item?.thumbUrl, [mediaPathRoot, safeIncidentId, itemKey, 'thumb']),
+      ]);
+
       const uploadedItem = compactMediaAuditRecordForCloudSync({
         ...item,
         photoUrl: uploadedUrl,
+        heroUrl: uploadedHeroUrl || undefined,
+        thumbUrl: uploadedThumbUrl || undefined,
       });
       const appendOptions = mediaGroup === 'documentation'
         ? { appendDocumentationItems: [uploadedItem] }
@@ -7054,6 +7160,8 @@ export function AppProvider({ children }) {
           return {
             ...currentItem,
             photoUrl: uploadedUrl,
+            heroUrl: uploadedHeroUrl || currentItem.heroUrl,
+            thumbUrl: uploadedThumbUrl || currentItem.thumbUrl,
           };
         });
 
@@ -7086,6 +7194,7 @@ export function AppProvider({ children }) {
     isOffline,
     operationalShipName,
     prepareCloudPhotoUrl,
+    prepareCloudVariantUrl,
     requestCloudSync,
     syncIncidentDetailToDomain,
   ]);

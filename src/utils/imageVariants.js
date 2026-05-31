@@ -1,5 +1,5 @@
 /*
-Tujuan: Membuat dan menyimpan beberapa resolusi foto (thumbnail 64px, hero 256px, full) dari satu data URL.
+Tujuan: Membuat dan menyimpan beberapa resolusi foto (thumbnail 64px, hero 500px, full) dari satu data URL.
 Caller: Handler upload foto patroli/insiden/galeri/progress di AppContextRuntime.
 Dependensi: Canvas API browser dan image store IndexedDB.
 Main Functions: saveImagePhotoSet (generate varian + simpan), deriveLocalVariantKey (turunkan key varian dari key dasar).
@@ -8,7 +8,7 @@ Side Effects: Memakai canvas 2D untuk downscale WebP dan menulis beberapa entri 
 
 import { saveImageVariantsToDB } from './imageStore';
 
-export const HERO_VARIANT_MAX_EDGE = 256;
+export const HERO_VARIANT_MAX_EDGE = 500;
 export const THUMB_VARIANT_MAX_EDGE = 64;
 const VARIANT_QUALITY = 0.8;
 
@@ -41,7 +41,7 @@ function downscaleToDataUrl(image, maxEdge, quality) {
 }
 
 /*
-Membuat varian hero (256px) dan thumbnail (64px) dari data URL full yang sudah dikompres,
+Membuat varian hero (500px) dan thumbnail (64px) dari data URL full yang sudah dikompres,
 lalu menyimpan ketiganya ke IndexedDB. Mengembalikan { photoUrl, heroUrl, thumbUrl } berisi
 key idb:// yang bisa diturunkan satu sama lain. Bila pembuatan varian gagal (mis. browser
 tanpa canvas), hero/thumb otomatis fallback ke key foto penuh sehingga upload tetap jalan.

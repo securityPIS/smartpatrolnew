@@ -1,3 +1,11 @@
+/*
+Tujuan: Menyimpan dan memuat foto (termasuk varian thumbnail/hero) di IndexedDB lokal perangkat.
+Caller: Handler upload foto di AppContextRuntime, util imageVariants, dan AsyncImage saat resolve key idb://.
+Dependensi: IndexedDB browser.
+Main Functions: saveImageToDB (simpan satu foto), saveImageVariantsToDB (simpan varian full/hero/thumb), loadImageFromDB (muat), deleteOldImagesFromDB (cleanup berbasis usia).
+Side Effects: Membuka/menulis/menghapus object store IndexedDB 'smartpatrol-images'.
+*/
+
 const DB_NAME = 'smartpatrol-images';
 const STORE_NAME = 'photos';
 

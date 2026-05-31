@@ -1,6 +1,6 @@
 import React from 'react';
 import { usePatrol, useReports, useWeather } from '../../context/AppContextRuntime';
-import { ChevronDown, Trash2, AlertTriangle, CheckCircle2, MapPin, ExternalLink, Thermometer, Wind, Camera, Images } from 'lucide-react';
+import { ChevronDown, Trash2, AlertTriangle, CheckCircle2, MapPin, ExternalLink, Thermometer, Wind, Camera, Images, Calendar, User } from 'lucide-react';
 import AsyncImage from '../AsyncImage';
 import { TimeAuditRecordCard } from '../TimeAuditStatus';
 
@@ -103,13 +103,21 @@ export default function ReportDetailView({ isInline = false }) {
            {!isReadOnly && (
              <button onClick={(e) => { e.stopPropagation(); handleDeleteReport(selectedReportDetail.id); }} className="absolute top-4 right-4 p-2 bg-rose-500/80 text-white rounded-full backdrop-blur-md border border-rose-500/50 hover:bg-rose-600 transition-colors z-10" aria-label="Hapus laporan"><Trash2 className="w-5 h-5"/></button>
            )}
-           <div className="absolute bottom-4 right-4 bg-black/70 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs text-white/90 text-right border border-cyan-900/50 z-10 shadow-lg"><p className="font-bold text-cyan-400">{selectedReportDetail.completedBy || '-'}</p><p className="text-[10px] text-cyan-100/70">{syncDateLabel}</p><p className="text-[10px] text-cyan-100/70">{syncTimeLabel} WIB</p></div>
-           <div className="absolute bottom-4 left-4 right-36 z-10">
-              <span className={`text-[10px] px-2 py-1 border rounded font-bold mb-2 inline-block shadow-sm ${headerToneClass}`}>{isMissed ? 'MISSED' : selectedReportDetail.resultType === 'temuan' ? 'TEMUAN' : 'AMAN'}</span>
-              <span className="text-[10px] px-2 py-1 ml-2 border border-cyan-500/50 rounded font-bold text-cyan-400 bg-cyan-900/40 inline-block shadow-sm">{isReadOnly ? 'Riwayat Shift' : 'Laporan Titik'}</span>
-              <h2 className="text-2xl font-black text-white drop-shadow-md leading-tight line-clamp-2 mt-1">{selectedReportDetail.name}</h2>
-              <p className="text-[10px] text-cyan-100/80 mt-2 font-semibold tracking-wide">{syncDateTimeLabel}</p>
-           </div>
+           {isAman ? (
+             <div className="absolute bottom-4 left-4 z-10">
+                <span className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 border border-emerald-500 rounded-lg font-bold bg-emerald-500/15 text-emerald-300 backdrop-blur-md shadow-lg"><CheckCircle2 className="w-3.5 h-3.5" /> Aman</span>
+             </div>
+           ) : (
+             <>
+               <div className="absolute bottom-4 right-4 bg-black/70 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs text-white/90 text-right border border-cyan-900/50 z-10 shadow-lg"><p className="font-bold text-cyan-400">{selectedReportDetail.completedBy || '-'}</p><p className="text-[10px] text-cyan-100/70">{syncDateLabel}</p><p className="text-[10px] text-cyan-100/70">{syncTimeLabel} WIB</p></div>
+               <div className="absolute bottom-4 left-4 right-36 z-10">
+                  <span className={`text-[10px] px-2 py-1 border rounded font-bold mb-2 inline-block shadow-sm ${headerToneClass}`}>{isMissed ? 'MISSED' : selectedReportDetail.resultType === 'temuan' ? 'TEMUAN' : 'AMAN'}</span>
+                  <span className="text-[10px] px-2 py-1 ml-2 border border-cyan-500/50 rounded font-bold text-cyan-400 bg-cyan-900/40 inline-block shadow-sm">{isReadOnly ? 'Riwayat Shift' : 'Laporan Titik'}</span>
+                  <h2 className="text-2xl font-black text-white drop-shadow-md leading-tight line-clamp-2 mt-1">{selectedReportDetail.name}</h2>
+                  <p className="text-[10px] text-cyan-100/80 mt-2 font-semibold tracking-wide">{syncDateTimeLabel}</p>
+               </div>
+             </>
+           )}
         </div>
       ) : (
         <div className="p-4 border-b border-cyan-900/50 flex items-center justify-between gap-3 bg-[#0b1229] shrink-0 shadow-sm">
@@ -118,9 +126,15 @@ export default function ReportDetailView({ isInline = false }) {
               <button onClick={() => setSelectedReportDetail(null)} className="p-2 bg-[#070b19] border border-cyan-800 text-cyan-300 rounded-full hover:bg-cyan-900/50 transition-colors" aria-label="Tutup laporan"><ChevronDown className="w-5 h-5 rotate-90"/></button>
             )}
             <div>
-              <span className="text-[10px] text-cyan-500 uppercase tracking-widest font-bold">{isReadOnly ? 'Riwayat Shift' : 'Laporan Titik'}</span>
-              <h3 className="font-bold text-xl text-cyan-50 line-clamp-1">{selectedReportDetail.name}</h3>
-              <p className="text-[10px] text-cyan-400/80 mt-1 font-semibold tracking-wide">{syncDateTimeLabel}</p>
+              {isAman ? (
+                <span className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 border border-emerald-500 rounded-lg font-bold bg-emerald-500/15 text-emerald-300"><CheckCircle2 className="w-3.5 h-3.5" /> Aman</span>
+              ) : (
+                <>
+                  <span className="text-[10px] text-cyan-500 uppercase tracking-widest font-bold">{isReadOnly ? 'Riwayat Shift' : 'Laporan Titik'}</span>
+                  <h3 className="font-bold text-xl text-cyan-50 line-clamp-1">{selectedReportDetail.name}</h3>
+                  <p className="text-[10px] text-cyan-400/80 mt-1 font-semibold tracking-wide">{syncDateTimeLabel}</p>
+                </>
+              )}
             </div>
           </div>
           {!isReadOnly && (
@@ -200,6 +214,27 @@ export default function ReportDetailView({ isInline = false }) {
          )}
          {isAman && (
            <div className="space-y-3">
+             <div className="bg-[#0b1229] p-4 rounded-xl border border-cyan-900/50 shadow-sm">
+               <div className="flex items-center justify-between gap-3 mb-3">
+                 <p className="text-[10px] text-cyan-600 font-bold uppercase tracking-widest">Titik Checkpoint</p>
+                 <span className="text-[10px] px-2 py-1 border border-cyan-500/50 rounded font-bold text-cyan-400 bg-cyan-900/40 shrink-0">{isReadOnly ? 'Riwayat Shift' : 'Laporan Titik'}</span>
+               </div>
+               <h2 className="text-xl font-black text-cyan-50 leading-tight flex items-start gap-2">
+                 <MapPin className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
+                 <span className="line-clamp-2">{selectedReportDetail.name || '-'}</span>
+               </h2>
+               <div className="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-cyan-900/50">
+                 <div className="min-w-0">
+                   <p className="text-[10px] text-cyan-600 font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5"><Calendar className="w-3 h-3" /> Tanggal</p>
+                   <p className="text-sm font-bold text-cyan-50">{syncDateLabel}</p>
+                   <p className="text-[10px] text-cyan-100/60 mt-0.5">{syncTimeLabel} WIB</p>
+                 </div>
+                 <div className="min-w-0">
+                   <p className="text-[10px] text-cyan-600 font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5"><User className="w-3 h-3" /> Petugas</p>
+                   <p className="text-sm font-bold text-cyan-50 truncate">{selectedReportDetail.completedBy || '-'}</p>
+                 </div>
+               </div>
+             </div>
              <div className="bg-[#0b1229] p-4 rounded-xl border border-cyan-900/50 shadow-sm">
                {hasGpsSnapshot ? (
                  <>

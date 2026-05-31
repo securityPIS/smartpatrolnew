@@ -1,6 +1,6 @@
 # SYSTEM_MAP - SmartPatrol SQL
 
-> Terakhir diperbarui: 2026-05-22.
+> Terakhir diperbarui: 2026-05-31.
 > Bahasa pemrograman: JavaScript (React 19 + Vite 8), SQL Postgres, Supabase Edge Functions (Deno).
 
 ## Project Summary
@@ -392,3 +392,40 @@ checkpoint pending summary, shift wrap-up) kembali masuk di in-app maupun push.*
 > nama checkpoint ternormalisasi (fallback id runtime `${shipId}::slug::${index}`). Pola
 > salah `from ship_checkpoints` sudah dua kali jadi bug senyap (`finalize_shift` → 202605290002,
 > cron notifikasi → 202605300005); jangan ulangi.
+
+## Sinkronisasi Status Petugas Shift Lintas-Device (bug fix)
+
+Gejala: sebelum patroli, petugas wajib mengisi status petugas patroli/istirahat sekapal
+(gate `ShiftStatusModal`). Aturannya "cukup diisi satu petugas per shift, yang lain tidak
+perlu mengisi lagi (sync)". Faktanya sinkron HANYA berlaku di device yang sama — petugas
+lain di HP berbeda tetap diminta mengisi ulang walau rekannya sudah mengisi.
+
+Akar masalah: tabel `shift_status_records`/`shift_status_items` ada sejak init
+(`202605220001`) dengan RLS **enabled tapi TANPA policy** (semua akses ditolak default) dan
+**tidak masuk realtime publication**. Selain itu jalur cloud tidak pernah menyentuhnya:
+`cloudState.js` `hydrateStateFromSql` mengembalikan `shiftStatusRecords: {}` hard-coded, dan
+`writeStateToSql` hanya menulis `profiles`/`ships`. Jadi record status shift murni hidup di
+`localStorage` device pengisi.
+
+Perbaikan (migration `202605310001_shift_status_sync.sql` + `cloudState.js`):
+- Migration menambah policy RLS `shift_status_records` (select/insert/update via
+  `can_access_ship_name(ship_name)`, delete via `is_admin()`), policy `shift_status_items`
+  (ikut record induk), trigger `set_updated_at`, dan `shift_status_records` ke realtime
+  publication. Pola mengikuti `patrol_reports`.
+- `writeStateToSql` meng-upsert `state.shiftStatusRecords` ke `shift_status_records`
+  (`onConflict ship_id,shift_key`; error RLS kapal lain diabaikan seperti profiles/ships).
+- `hydrateStateFromSql` membaca `shift_status_records` (domain SEKUNDER: gagal → dianggap
+  kosong, tidak menjatuhkan sinkron laporan patroli) dan merekonstruksi map keyed
+  `${shipId}|${shiftKey}`. Listener realtime tabel ditambahkan ke `subscribeToCloudAppState`.
+
+Tidak ada perubahan di `AppContextRuntime.jsx`: `handleSaveCurrentShiftStatus` sudah memanggil
+`requestCloudSync('urgent')` (kini benar-benar menulis ke DB), dan `applyCloudSharedState`
+sudah memetakan `shiftStatusRecords` masuk ke state (kini terisi dari DB) →
+`getShiftStatusRecordForShipShift` menemukan record rekan sekapal → `isCurrentShiftStatusCompleted`
+true → checkpoint ter-enable tanpa mengisi ulang. Helper map: `shiftStatusRecordToRow` /
+`shiftStatusRowToRecord` (`cloudState.js`). Daftar item disimpan di kolom `payload` JSONB record
+(tabel `shift_status_items` belum ditulis klien, analog dengan jalur payload lain).
+
+Prasyarat agar sync jalan: migrasi `202605310001` ter-apply; `VITE_ENABLE_CLOUD_SYNC=1` &
+`VITE_ENABLE_CLOUD_SYNC_WRITE=1`; `profiles.ship_assigned` petugas sama persis dengan
+`ship_name` record (syarat RLS `can_access_ship_name`).

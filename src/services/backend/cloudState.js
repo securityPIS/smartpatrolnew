@@ -321,15 +321,65 @@ export async function markNotificationRecipientRead(baseIds = [], userId = '') {
   if (error && !isRowLevelSecurityError(error)) throw error;
 }
 
+// Map record status shift (state runtime) ke baris tabel shift_status_records.
+// ship_name WAJIB terisi: RLS (can_access_ship_name) menolak baris tanpa nama kapal yang
+// cocok, jadi record tanpa shipId/shiftKey/shipName di-skip agar tidak gagal senyap.
+function shiftStatusRecordToRow(record = {}) {
+  const shipId = String(record.shipId || '').trim();
+  const shiftKey = String(record.shiftKey || '').trim();
+  const shipName = String(record.shipName || '').trim();
+  if (!shipId || !shiftKey || !shipName) return null;
+
+  return {
+    client_event_id: record.key || `${shipId}|${shiftKey}`,
+    ship_id: shipId,
+    ship_name: shipName,
+    shift_key: shiftKey,
+    filled_by_user_id: record.filledByUserId || null,
+    filled_by_name: String(record.filledByName || ''),
+    // Kolom *_ms bertipe bigint: paksa integer (trusted time bisa membawa pecahan sub-ms).
+    filled_at_trusted_ms: Number.isFinite(record.filledAtTrustedMs) ? Math.round(record.filledAtTrustedMs) : null,
+    filled_at_trusted_iso: record.filledAtTrustedIso || null,
+    time_trust_level: String(record.timeTrustLevel || 'unverified'),
+    clock_tamper_detected: Boolean(record.clockTamperDetected),
+    payload: { ...record },
+  };
+}
+
+function shiftStatusRowToRecord(row = {}) {
+  const payload = row.payload && typeof row.payload === 'object' ? row.payload : {};
+  const shipId = String(row.ship_id || payload.shipId || '').trim();
+  const shiftKey = String(row.shift_key || payload.shiftKey || '').trim();
+  if (!shipId || !shiftKey) return null;
+
+  return {
+    ...payload,
+    key: `${shipId}|${shiftKey}`,
+    shipId,
+    shiftKey,
+    shipName: row.ship_name || payload.shipName || '',
+    filledByUserId: row.filled_by_user_id || payload.filledByUserId || null,
+    filledByName: row.filled_by_name || payload.filledByName || '',
+    filledAtTrustedMs: Number.isFinite(row.filled_at_trusted_ms)
+      ? row.filled_at_trusted_ms
+      : (payload.filledAtTrustedMs ?? null),
+    filledAtTrustedIso: row.filled_at_trusted_iso || payload.filledAtTrustedIso || null,
+    timeTrustLevel: row.time_trust_level || payload.timeTrustLevel || null,
+    clockTamperDetected: Boolean(row.clock_tamper_detected ?? payload.clockTamperDetected),
+    items: Array.isArray(payload.items) ? payload.items : [],
+  };
+}
+
 async function hydrateStateFromSql() {
   const supabase = ensureSupabaseClient();
-  const [profiles, ships, reports, incidents, sosAlerts, notifications] = await Promise.all([
+  const [profiles, ships, reports, incidents, sosAlerts, notifications, shiftStatus] = await Promise.all([
     supabase.from('profiles').select('*').order('name', { ascending: true }),
     supabase.from('ships').select('*').order('name', { ascending: true }),
     supabase.from('patrol_reports').select('*').limit(500),
     supabase.from('incidents').select('*').order('created_at', { ascending: false }).limit(200),
     supabase.from('sos_alerts').select('*').order('triggered_at', { ascending: false }).limit(20),
     supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(120),
+    supabase.from('shift_status_records').select('*').limit(200),
   ]);
 
   // Domain inti — tanpa data ini state tidak bisa dibangun, jadi gagalkan hydrate
@@ -340,7 +390,7 @@ async function hydrateStateFromSql() {
   }
   // Domain sekunder — bila gagal (mis. RLS atau drift skema), jangan jatuhkan seluruh
   // sinkronisasi; cukup perlakukan sebagai kosong agar laporan patroli tetap tersinkron.
-  for (const [label, result] of [['incidents', incidents], ['sos_alerts', sosAlerts], ['notifications', notifications]]) {
+  for (const [label, result] of [['incidents', incidents], ['sos_alerts', sosAlerts], ['notifications', notifications], ['shift_status_records', shiftStatus]]) {
     if (result.error) {
       console.error(`Gagal memuat domain '${label}' saat hydrate cloud, lanjut tanpa data domain tersebut`, result.error);
       result.data = [];
@@ -367,6 +417,16 @@ async function hydrateStateFromSql() {
 
   const activeSosRow = (sosAlerts.data || []).find(row => row.status === 'active') || null;
 
+  // Status petugas shift: rekonstruksi map keyed `${shipId}|${shiftKey}` dari baris DB.
+  // Inilah yang membuat aturan "cukup diisi satu petugas per shift" tersinkron lintas-device:
+  // begitu satu petugas mengisi, baris ini terbaca petugas lain sekapal (RLS can_access_ship_name)
+  // sehingga checkpoint mereka langsung ter-enable tanpa mengisi ulang.
+  const shiftStatusRecords = {};
+  (shiftStatus.data || []).forEach((row) => {
+    const record = shiftStatusRowToRecord(row);
+    if (record) shiftStatusRecords[record.key] = record;
+  });
+
   return {
     schemaVersion: CLOUD_STATE_SCHEMA_VERSION,
     clientUpdatedAt: Date.now(),
@@ -380,7 +440,7 @@ async function hydrateStateFromSql() {
       notifications: reconstructNotificationsFromRows(notifications.data || []),
       activeSOSAlert: activeSosRow?.payload || null,
       sosHistory: (sosAlerts.data || []).filter(row => row.status !== 'active').map(row => row.payload || row),
-      shiftStatusRecords: {},
+      shiftStatusRecords,
     },
   };
 }
@@ -410,6 +470,7 @@ export function subscribeToCloudAppState(callback, onError) {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => fetchState().catch(onError))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'pending_registrations' }, () => fetchState().catch(onError))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => fetchState().catch(onError))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'shift_status_records' }, () => fetchState().catch(onError))
     .subscribe();
 
   return () => {
@@ -475,6 +536,19 @@ async function writeStateToSql(state, options = {}) {
   if (shipRows.length > 0) {
     const { error } = await supabase.from('ships').upsert(shipRows, { onConflict: 'id' });
     if (error && !String(error.message || '').toLowerCase().includes('row-level security')) throw error;
+  }
+
+  // Status petugas shift: upsert idempotent per (ship_id, shift_key). RLS membatasi ke kapal
+  // yang ditugaskan, jadi error RLS untuk record kapal lain (mis. saat admin menyinkron banyak
+  // kapal) di-abaikan seperti profiles/ships, bukan dilempar.
+  const shiftStatusRows = state.shiftStatusRecords && typeof state.shiftStatusRecords === 'object'
+    ? Object.values(state.shiftStatusRecords).map(shiftStatusRecordToRow).filter(Boolean)
+    : [];
+  if (shiftStatusRows.length > 0) {
+    const { error } = await supabase
+      .from('shift_status_records')
+      .upsert(shiftStatusRows, { onConflict: 'ship_id,shift_key' });
+    if (error && !isRowLevelSecurityError(error)) throw error;
   }
 
   await supabase.from('client_mutations').insert({

@@ -1102,7 +1102,8 @@ const DailyReportPage = React.memo(function DailyReportPage() {
                     <div className="w-full xl:w-36">
                       <div className="overflow-hidden rounded-[1.2rem] border border-yellow-500/20 bg-[#0b1229]">
                         <AsyncImage
-                          src={incident.photoUrl}
+                          src={incident.heroUrl}
+                          fallbackSrc={incident.photoUrl}
                           alt={incident.location}
                           className="h-32 w-full object-cover xl:h-36"
                           fallbackLayout={<div className="flex h-32 w-full items-center justify-center text-cyan-700 xl:h-36"><CircleAlert className="h-6 w-6" /></div>}

@@ -95,7 +95,7 @@ export default function ReportDetailView({ isInline = false }) {
     <div className={`flex flex-col h-full bg-[#070b19] ${isInline ? 'border-l border-cyan-900/50' : 'fixed inset-0 z-[100] sm:max-w-md sm:mx-auto sm:border-x sm:border-cyan-900/50'}`}>
       {selectedReportDetail.photoUrl ? (
         <div className="w-full h-64 bg-[#0b1229] relative shrink-0 cursor-pointer group" onClick={() => setPreviewPhoto({url: selectedReportDetail.photoUrl, author: selectedReportDetail.completedBy, time: syncDateTimeLabel})}>
-           <AsyncImage src={selectedReportDetail.photoUrl} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" alt="Bukti" />
+           <AsyncImage src={selectedReportDetail.heroUrl} fallbackSrc={selectedReportDetail.photoUrl} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" alt="Bukti" />
            <div className="absolute inset-0 bg-gradient-to-b from-[#070b19]/80 via-transparent to-[#070b19]"></div>
            {!isInline && (
              <button onClick={(e) => { e.stopPropagation(); setSelectedReportDetail(null); }} className="absolute top-4 left-4 p-2 bg-black/50 text-white rounded-full backdrop-blur-md border border-white/20 hover:bg-black/70 transition-colors z-10" aria-label="Tutup laporan"><ChevronDown className="w-6 h-6 rotate-90"/></button>
@@ -143,7 +143,7 @@ export default function ReportDetailView({ isInline = false }) {
                 className="w-12 h-12 shrink-0 rounded-xl overflow-hidden border border-cyan-800/60 bg-[#0b1229] hover:border-cyan-500/60 transition-all group"
                 aria-label={`Lihat foto patroli ${index + 1}`}
               >
-                <AsyncImage src={item.photoUrl} className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-300" alt={`Foto patroli ${index + 1}`} />
+                <AsyncImage src={item.thumbUrl} fallbackSrc={item.photoUrl} className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-300" alt={`Foto patroli ${index + 1}`} />
               </button>
             ))}
             {canUploadGallery && (

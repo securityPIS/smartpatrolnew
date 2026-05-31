@@ -249,7 +249,7 @@ const IncidentsPage = React.memo(function IncidentsPage() {
                    <div className="flex flex-col items-end justify-between shrink-0 gap-2">
                       {inc.photoUrl ? (
                          <div className={`w-20 h-20 rounded-lg overflow-hidden border shadow-sm ${isSelected ? (inc.isSOS ? 'border-rose-400' : (isManualIncident ? 'border-fuchsia-400' : 'border-yellow-400')) : (isClosed ? (inc.isSOS ? 'border-rose-900/40' : 'border-slate-700') : (inc.isSOS ? 'border-rose-700/50' : (isManualIncident ? 'border-fuchsia-700/50' : 'border-yellow-700/50')))}`}>
-                            <AsyncImage src={inc.photoUrl} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" alt="Thumb"/>
+                            <AsyncImage src={inc.thumbUrl} fallbackSrc={inc.photoUrl} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" alt="Thumb"/>
                          </div>
                       ) : (
                          <div className="w-20 h-20"></div>

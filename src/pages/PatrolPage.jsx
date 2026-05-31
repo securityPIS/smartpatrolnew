@@ -309,7 +309,7 @@ const PatrolPage = React.memo(function PatrolPage() {
           className={`w-12 h-12 rounded-lg border overflow-hidden relative flex-shrink-0 bg-[#070b19] ${isMissed ? 'border-rose-500/40' : isTemuan ? 'border-yellow-500/40' : 'border-emerald-500/40'} ${item.photoUrl ? 'cursor-pointer hover:opacity-80' : ''}`}
         >
           {item.photoUrl ? (
-            <AsyncImage src={item.photoUrl} className="w-full h-full object-cover" alt="Thumb" />
+            <AsyncImage src={item.thumbUrl} fallbackSrc={item.photoUrl} className="w-full h-full object-cover" alt="Thumb" />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-cyan-700">
               {isMissed ? <CircleOff className="w-4 h-4" /> : <FileText className="w-4 h-4" />}

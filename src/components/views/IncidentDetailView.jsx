@@ -285,7 +285,7 @@ export default function IncidentDetailView({ isInline = false }) {
     <div className={`flex flex-col h-full bg-[#070b19] ${isInline ? 'border-l border-cyan-900/50' : 'fixed inset-0 z-[100] sm:max-w-md sm:mx-auto sm:border-x sm:border-cyan-900/50'}`}>
       {selectedIncident.photoUrl ? (
         <div className="w-full h-64 bg-[#0b1229] relative shrink-0 cursor-pointer group" onClick={() => setPreviewPhoto({ url: selectedIncident.photoUrl, author: selectedIncident.reportedBy, time: `${selectedIncident.date} ${selectedIncident.time}` })}>
-          <AsyncImage src={selectedIncident.photoUrl} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" alt="Bukti" />
+          <AsyncImage src={selectedIncident.heroUrl} fallbackSrc={selectedIncident.photoUrl} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" alt="Bukti" />
           <div className="absolute inset-0 bg-gradient-to-b from-[#070b19]/80 via-transparent to-[#070b19]"></div>
           <div className="absolute inset-0 bg-gradient-to-tr from-white/80 via-transparent to-transparent light-vignette-bl opacity-0 pointer-events-none"></div>
           {!isInline && (
@@ -505,7 +505,7 @@ export default function IncidentDetailView({ isInline = false }) {
                     className="group overflow-hidden rounded-2xl border border-cyan-800/50 bg-[#0b1229] text-left hover:border-fuchsia-500/40 transition-all"
                   >
                     <div className="aspect-square bg-[#070b19] overflow-hidden">
-                      <AsyncImage src={item.photoUrl} className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300" alt="Dokumentasi temuan" />
+                      <AsyncImage src={item.thumbUrl} fallbackSrc={item.photoUrl} className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300" alt="Dokumentasi temuan" />
                     </div>
                     <div className="border-t border-cyan-900/40 p-2">
                       <p className="text-[10px] font-bold text-cyan-100 leading-tight">{item.date || '-'} {item.time || '-'}</p>
@@ -533,7 +533,7 @@ export default function IncidentDetailView({ isInline = false }) {
                     <p className="text-[10px] font-mono text-cyan-500 mb-1.5">{prog.date} {prog.time} {' · '} <span className="text-emerald-400 font-bold">{prog.author}</span></p>
                     <div className="flex gap-3 items-start bg-[#0b1229] p-3.5 rounded-xl border border-cyan-900/50 shadow-sm hover:border-cyan-700 transition-colors">
                       <p className="text-sm text-cyan-50 flex-1 whitespace-pre-wrap leading-relaxed">{prog.comment}</p>
-                      {prog.photoUrl && <div className="w-20 h-20 rounded-lg overflow-hidden border border-cyan-800 flex-shrink-0 cursor-pointer hover:opacity-80 transition-all relative group" onClick={() => setPreviewPhoto({ url: prog.photoUrl, author: prog.author, time: `${prog.date} ${prog.time}` })}><AsyncImage src={prog.photoUrl} className="w-full h-full object-cover" alt="Progress" /></div>}
+                      {prog.photoUrl && <div className="w-20 h-20 rounded-lg overflow-hidden border border-cyan-800 flex-shrink-0 cursor-pointer hover:opacity-80 transition-all relative group" onClick={() => setPreviewPhoto({ url: prog.photoUrl, author: prog.author, time: `${prog.date} ${prog.time}` })}><AsyncImage src={prog.thumbUrl} fallbackSrc={prog.photoUrl} className="w-full h-full object-cover" alt="Progress" /></div>}
                     </div>
                   </div>
                 ))}

@@ -14,6 +14,7 @@ import { createPosterDataUrl, DEFAULT_LOCATION_OPTIONS } from '../data/defaultDa
 import { readFileAsDataUrl, readImageFileAsDataUrl } from '../utils/images';
 import { sanitizeEmail, sanitizeMultilineText, sanitizePhone, sanitizeText, sanitizeUrl, isReportFieldValid } from '../utils/sanitize';
 import { loadImageFromDB, saveImageToDB } from '../utils/imageStore';
+import { saveImagePhotoSet } from '../utils/imageVariants';
 import { checkStorageQuota } from '../utils/storageQuota';
 import { assignUserToExclusiveShip, reconcileUserShipAssignments, removeUserFromShipAssignment, resolveExplicitOverride, shouldDeferPetugasFleetValidation } from '../utils/userManagement';
 import {
@@ -904,6 +905,8 @@ function createCheckpointGalleryPhotoRecord(photoUrl, options = {}) {
   return normalizeTimeAuditRecord({
     id: options.id || `checkpoint-gallery-${trustedTimestamp.occurredAtTrustedMs}-${Math.random().toString(36).slice(2, 8)}`,
     photoUrl,
+    heroUrl: options.heroUrl || photoUrl,
+    thumbUrl: options.thumbUrl || photoUrl,
     author: sanitizeText(options.author || '', 80) || '-',
     date: options.date || formatAppDate(new Date(createdAt)),
     time: options.time || formatAppTime(new Date(createdAt)),
@@ -4043,6 +4046,13 @@ function compactMediaAuditRecordForCloudSync(record = {}) {
     ...restRecord
   } = record;
 
+  // Varian resolusi (heroUrl/thumbUrl) yang masih lokal (idb://) tidak boleh dikirim ke cloud:
+  // key tersebut hanya valid di IndexedDB perangkat pembuat. Kita HAPUS (bukan set null) agar
+  // saat record cloud di-merge kembali ke state lokal, key varian lokal yang masih ada tidak
+  // tertimpa. Device lain yang menerima record tanpa varian otomatis fallback ke foto penuh.
+  if (isLocalOnlyAssetUrl(restRecord.heroUrl)) delete restRecord.heroUrl;
+  if (isLocalOnlyAssetUrl(restRecord.thumbUrl)) delete restRecord.thumbUrl;
+
   return {
     ...restRecord,
     ...compactTimeAuditFieldsForCloudSync(record),
@@ -4873,7 +4883,7 @@ export function AppProvider({ children }) {
   const [selectedIncident, setSelectedIncident] = useState(null);
   const [incidentMeta, setIncidentMeta] = useState(() => persistedState?.incidentMeta || {});
   const [deletedRecords, setDeletedRecords] = useState(() => createDeletedRecordsState(persistedState?.deletedRecords));
-  const [newProgress, setNewProgress] = useState({ comment: '', photoUrl: null });
+  const [newProgress, setNewProgress] = useState({ comment: '', photoUrl: null, heroUrl: null, thumbUrl: null });
   const [showUserForm, setShowUserForm] = useState(false);
   const [userFormData, setUserFormData] = useState(() => createUserFormState());
   const [userFormError, setUserFormError] = useState('');
@@ -7816,10 +7826,10 @@ export function AppProvider({ children }) {
     }
     const dataUrl = await pickLocalImage({ cameraOnly: useCameraOnly });
     if (!dataUrl) return;
-    const url = await saveImageToDB(dataUrl);
-    if (!url) return;
-    if (isIncident) setIncidentForm(prev => ({ ...prev, photoUrl: url }));
-    else setActiveForms(prev => ({ ...prev, [id]: { ...prev[id], photoUrl: url } }));
+    const photoSet = await saveImagePhotoSet(dataUrl);
+    if (!photoSet) return;
+    if (isIncident) setIncidentForm(prev => ({ ...prev, ...photoSet }));
+    else setActiveForms(prev => ({ ...prev, [id]: { ...prev[id], ...photoSet } }));
   }, [activeForms]);
   const handleSubmitPatrol = useCallback(async (id) => {
     if (!currentUserRecord || !operationalShip) return;
@@ -7881,6 +7891,8 @@ export function AppProvider({ children }) {
         gpsSnapshot: environmentSnapshot.gpsSnapshot,
         weatherSnapshot: environmentSnapshot.weatherSnapshot,
         photoUrl: formState.photoUrl,
+        heroUrl: formState.heroUrl || formState.photoUrl,
+        thumbUrl: formState.thumbUrl || formState.photoUrl,
         resultType: formState.type,
         penyebab: sanitizeMultilineText(formState.penyebab, 240),
         kejadian: sanitizeMultilineText(formState.kejadian, 280),
@@ -7962,10 +7974,12 @@ export function AppProvider({ children }) {
     const dataUrl = await pickLocalImage();
     if (!dataUrl) return;
 
-    const photoUrl = await saveImageToDB(dataUrl);
-    if (!photoUrl) return;
+    const photoSet = await saveImagePhotoSet(dataUrl);
+    if (!photoSet) return;
 
-    const galleryPhoto = createCheckpointGalleryPhotoRecord(photoUrl, {
+    const galleryPhoto = createCheckpointGalleryPhotoRecord(photoSet.photoUrl, {
+      heroUrl: photoSet.heroUrl,
+      thumbUrl: photoSet.thumbUrl,
       author: currentUser || selectedReportDetail?.completedBy || '',
     });
 
@@ -8058,10 +8072,10 @@ export function AppProvider({ children }) {
   const handlePatrolCameraCapture = useCallback(async (dataUrl) => {
     const captureRequest = pendingPatrolCameraCapture;
     if (!captureRequest?.id || !captureRequest?.type || !dataUrl) return;
-    const url = await saveImageToDB(dataUrl);
-    if (!url) return;
+    const photoSet = await saveImagePhotoSet(dataUrl);
+    if (!photoSet) return;
     if (captureRequest.intent === 'incident-progress') {
-      setNewProgress((previousProgress) => ({ ...previousProgress, photoUrl: url }));
+      setNewProgress((previousProgress) => ({ ...previousProgress, ...photoSet }));
       setPendingPatrolCameraCapture(null);
       return;
     }
@@ -8071,7 +8085,7 @@ export function AppProvider({ children }) {
         penyebab: '',
         kejadian: '',
         tindakLanjut: '',
-        photoUrl: url,
+        ...photoSet,
       },
     });
     setPendingPatrolCameraCapture(null);
@@ -8103,6 +8117,8 @@ export function AppProvider({ children }) {
       location: loc,
       customLocation: incidentForm.locType === 'custom' ? loc : '',
       photoUrl: incidentForm.photoUrl,
+      heroUrl: incidentForm.heroUrl || incidentForm.photoUrl,
+      thumbUrl: incidentForm.thumbUrl || incidentForm.photoUrl,
       shipSnapshot,
       penyebab: sanitizeMultilineText(incidentForm.penyebab, 240),
       deskripsi: sanitizeMultilineText(incidentForm.deskripsi, 320),
@@ -8811,7 +8827,7 @@ export function AppProvider({ children }) {
       dedupeKey: `incident-progress:${incidentId}:${progressId}`,
       createdAt,
     }]);
-    setNewProgress({ comment: '', photoUrl: null });
+    setNewProgress({ comment: '', photoUrl: null, heroUrl: null, thumbUrl: null });
 
     void syncIncidentDetailToDomain(incident, domainMeta || nextMeta, {
       incidentId,
@@ -8841,8 +8857,9 @@ export function AppProvider({ children }) {
     if (showTrustedTimeGateDialog()) return;
     const dataUrl = await pickLocalImage();
     if (!dataUrl) return;
-    const photoUrlFromCamera = await saveImageToDB(dataUrl);
-    if (!photoUrlFromCamera) return;
+    const photoSet = await saveImagePhotoSet(dataUrl);
+    if (!photoSet) return;
+    const photoUrlFromCamera = photoSet.photoUrl;
 
     const trustedTimestamp = createTrustedTimestampRecord();
     const trustedNow = new Date(trustedTimestamp.occurredAtTrustedMs);
@@ -8854,6 +8871,8 @@ export function AppProvider({ children }) {
     const documentationRecord = {
       id: docId,
       photoUrl: photoUrlFromCamera,
+      heroUrl: photoSet.heroUrl,
+      thumbUrl: photoSet.thumbUrl,
       createdAt,
       date,
       time,
@@ -9158,21 +9177,22 @@ export function AppProvider({ children }) {
   const handleUpdateIncidentPhoto = useCallback(async (incidentId) => {
     const dataUrl = await pickLocalImage();
     if (!dataUrl) return;
-    const url = await saveImageToDB(dataUrl);
-    if (!url) return;
+    const photoSet = await saveImagePhotoSet(dataUrl);
+    if (!photoSet) return;
+    const { photoUrl: url, heroUrl, thumbUrl } = photoSet;
     if (typeof incidentId === 'string' && incidentId.startsWith('p-')) {
       const activeCheckpointForIncident = Object.values(checkpointsByShip)
         .flat()
         .find((checkpoint) => createPatrolIncidentId(checkpoint) === incidentId && !checkpoint.readOnly);
       const updatedCheckpointForDomain = activeCheckpointForIncident
-        ? { ...activeCheckpointForIncident, photoUrl: url }
+        ? { ...activeCheckpointForIncident, ...photoSet }
         : null;
       setCheckpointsByShip(previousState => Object.fromEntries(
         Object.entries(previousState).map(([shipId, shipCheckpoints]) => ([
           shipId,
           shipCheckpoints.map(checkpoint => (
             createPatrolIncidentId(checkpoint) === incidentId && !checkpoint.readOnly
-              ? { ...checkpoint, photoUrl: url }
+              ? { ...checkpoint, ...photoSet }
               : checkpoint
           )),
         ])),
@@ -9181,12 +9201,14 @@ export function AppProvider({ children }) {
         void syncPatrolReportToDomain(updatedCheckpointForDomain);
       }
     } else {
-      setIncidentsData(prev => prev.map(inc => inc.id === incidentId ? { ...inc, photoUrl: url } : inc));
+      setIncidentsData(prev => prev.map(inc => inc.id === incidentId ? { ...inc, ...photoSet } : inc));
       const incident = allIncidents.find(item => item.id === incidentId) || selectedIncident;
       if (incident && !incident.isSOS) {
         void syncIncidentDetailToDomain({
           ...incident,
           photoUrl: stripLocalAssetUrlSync(url),
+          heroUrl,
+          thumbUrl,
         }, incidentMeta[incidentId] || {}, {
           incidentId,
           clientUpdatedAt: Date.now(),
@@ -9195,7 +9217,7 @@ export function AppProvider({ children }) {
         });
       }
     }
-    setSelectedIncident(prev => prev && prev.id === incidentId ? { ...prev, photoUrl: url } : prev);
+    setSelectedIncident(prev => prev && prev.id === incidentId ? { ...prev, ...photoSet } : prev);
     requestCloudSync('urgent');
   }, [allIncidents, checkpointsByShip, currentUser, incidentMeta, requestCloudSync, selectedIncident, syncIncidentDetailToDomain, syncPatrolReportToDomain]);
 

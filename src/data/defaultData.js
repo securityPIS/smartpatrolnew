@@ -89,6 +89,8 @@ export function getEmptyPatrolDraft(type = "aman") {
     penyebab: "",
     tindakLanjut: "",
     photoUrl: "",
+    heroUrl: "",
+    thumbUrl: "",
     photoName: "",
   };
 }
@@ -102,6 +104,8 @@ export function getEmptyIncidentDraft() {
     deskripsi: "",
     tindakLanjut: "",
     photoUrl: "",
+    heroUrl: "",
+    thumbUrl: "",
     photoName: "",
   };
 }
@@ -110,6 +114,8 @@ export function getEmptyProgressDraft() {
   return {
     comment: "",
     photoUrl: "",
+    heroUrl: "",
+    thumbUrl: "",
     photoName: "",
   };
 }

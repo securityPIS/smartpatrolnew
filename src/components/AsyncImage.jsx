@@ -22,12 +22,12 @@ export default class AsyncImage extends React.PureComponent {
 
   componentDidMount() {
     this._isMounted = true;
-    this.resolveSource(this.props.src);
+    this.resolveSource(this.props.src, this.props.fallbackSrc);
   }
 
   componentDidUpdate(previousProps) {
-    if (previousProps.src !== this.props.src) {
-      this.resolveSource(this.props.src);
+    if (previousProps.src !== this.props.src || previousProps.fallbackSrc !== this.props.fallbackSrc) {
+      this.resolveSource(this.props.src, this.props.fallbackSrc);
     }
   }
 
@@ -35,31 +35,44 @@ export default class AsyncImage extends React.PureComponent {
     this._isMounted = false;
   }
 
-  async resolveSource(src) {
+  // Resolve satu sumber gambar. Mengembalikan data URL final, null bila kosong/gagal,
+  // atau langsung mengembalikan URL non-idb apa adanya untuk dipakai sebagai <img src>.
+  async resolveSingleSource(src) {
+    const safeSrc = typeof src === 'string' ? src : '';
+    if (!safeSrc) return null;
+    if (!safeSrc.startsWith('idb://')) return safeSrc;
+    return loadImageFromDB(safeSrc);
+  }
+
+  async resolveSource(src, fallbackSrc) {
     if (!this._isMounted) return;
     const requestSeq = this._resolveSeq + 1;
     this._resolveSeq = requestSeq;
-    const safeSrc = typeof src === 'string' ? src : '';
 
-    if (!safeSrc) {
-      this.setState({ dataUrl: null, loading: false });
-      return;
+    const isStale = () => (
+      !this._isMounted
+      || this._resolveSeq !== requestSeq
+      || this.props.src !== src
+      || this.props.fallbackSrc !== fallbackSrc
+    );
+
+    if (typeof src === 'string' && src.startsWith('idb://')) {
+      this.setState({ dataUrl: null, loading: true });
     }
-
-    if (!safeSrc.startsWith('idb://')) {
-      this.setState({ dataUrl: safeSrc, loading: false });
-      return;
-    }
-
-    this.setState({ dataUrl: null, loading: true });
 
     try {
-      const result = await loadImageFromDB(safeSrc);
-      if (!this._isMounted || this._resolveSeq !== requestSeq || this.props.src !== safeSrc) return;
-      this.setState({ dataUrl: result, loading: false });
+      let result = await this.resolveSingleSource(src);
+      // Foto resolusi rendah (thumb/hero) bisa belum tersedia di perangkat ini — mis. record
+      // dari device lain yang fotonya hanya tersinkron sebagai URL penuh. Pakai fallbackSrc
+      // (umumnya foto penuh) agar gambar tetap tampil alih-alih kosong.
+      if (!result && fallbackSrc && fallbackSrc !== src) {
+        result = await this.resolveSingleSource(fallbackSrc);
+      }
+      if (isStale()) return;
+      this.setState({ dataUrl: result || null, loading: false });
     } catch (error) {
       console.error('AsyncImage error:', error);
-      if (!this._isMounted || this._resolveSeq !== requestSeq || this.props.src !== safeSrc) return;
+      if (isStale()) return;
       this.setState({ dataUrl: null, loading: false });
     }
   }

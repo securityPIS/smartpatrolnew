@@ -52,11 +52,11 @@ function StatStrip({ summary, compact = false }) {
   const temuan = summary?.temuan || 0;
   const missed = summary?.missed || 0;
   const cellClass = compact
-    ? 'w-12 flex items-center justify-end gap-1.5 tabular-nums text-sm font-semibold'
-    : 'w-14 flex items-center justify-end gap-1.5 tabular-nums text-base font-bold';
-  const iconSize = compact ? 'w-4 h-4' : 'w-5 h-5';
+    ? 'w-10 flex items-center justify-end gap-1 tabular-nums text-xs font-semibold'
+    : 'w-11 flex items-center justify-end gap-1 tabular-nums text-sm font-semibold';
+  const iconSize = 'w-4 h-4';
   return (
-    <div className="flex items-center gap-3 shrink-0">
+    <div className="flex items-center gap-2 shrink-0">
       <span className={`${cellClass} text-emerald-300`} title={`${aman} aman`}>
         <CheckCircle2 className={`${iconSize} text-emerald-400`} />{aman}
       </span>
@@ -741,16 +741,16 @@ export default function HistoryPage() {
                   <button
                     type="button"
                     onClick={() => toggleDateExpanded(dateGroup.dateKey)}
-                    className={`w-full flex items-center gap-3 pl-4 pr-4 py-4 text-left transition-colors ${isDateExpanded ? 'bg-cyan-900/15' : 'hover:bg-cyan-900/10'}`}
+                    className={`w-full flex items-center gap-3 pl-4 pr-4 py-3 text-left transition-colors ${isDateExpanded ? 'bg-cyan-900/15' : 'hover:bg-cyan-900/10'}`}
                     aria-expanded={isDateExpanded}
                   >
                     {isDateExpanded ? <ChevronDown className="w-5 h-5 text-cyan-400 shrink-0" /> : <ChevronRight className="w-5 h-5 text-cyan-500 shrink-0" />}
                     <CalendarDays className="w-5 h-5 text-cyan-400 shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <p className="text-base font-bold text-cyan-50 truncate">{dateGroup.dateLabel}</p>
+                      <p className="text-sm font-bold text-cyan-50 truncate">{dateGroup.dateLabel}</p>
                       <p className="text-xs text-cyan-500 uppercase tracking-wider font-bold mt-0.5">{totalShifts} shift · {dateGroup.ships.length} kapal</p>
                     </div>
-                    <StatStrip summary={dateGroup.summary} />
+                    <StatStrip summary={dateGroup.summary} compact />
                   </button>
 
                   {/* Level 2: Kapal rows (di dalam tanggal yang expanded) */}

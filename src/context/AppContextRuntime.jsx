@@ -2944,6 +2944,13 @@ function createNotificationId() {
   return `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+// Memotong deskripsi panjang agar pesan notifikasi tetap ringkas dan enak dibaca.
+function truncateNotificationDetail(text, maxLength = 120) {
+  const safeText = sanitizeText(text || '', 320).trim();
+  if (!safeText) return '';
+  return safeText.length > maxLength ? `${safeText.slice(0, maxLength).trimEnd()}…` : safeText;
+}
+
 function createNotificationRecord(notification) {
   return {
     id: createNotificationId(),
@@ -7891,10 +7898,11 @@ export function AppProvider({ children }) {
       setPendingPatrolCameraCapture(null);
 
       if (submittedItem?.resultType === 'temuan') {
+        const findingDetail = truncateNotificationDetail(submittedItem.kejadian);
         appendNotifications([{
           type: 'incident_created',
-          title: 'Temuan patroli baru',
-          message: `${submittedItem.name} dilaporkan sebagai temuan oleh ${currentUser}.`,
+          title: '⚠️ Temuan patroli baru',
+          message: `📍 ${submittedItem.name} dilaporkan sebagai temuan oleh ${currentUser}.${findingDetail ? `\n📝 ${findingDetail}` : ''}`,
           senderName: currentUser,
           senderRole: currentUserRole,
           targetUserIds: getShipRecipients(operationalShipName, { includeAdmins: true, includePic: true, includePetugas: true }),
@@ -8102,10 +8110,11 @@ export function AppProvider({ children }) {
       ...trustedTimestamp,
     };
     setIncidentsData(prev => [newIncident, ...prev]);
+    const incidentDetail = truncateNotificationDetail(newIncident.deskripsi);
     appendNotifications([{
       type: 'incident_created',
-      title: 'Laporan temuan baru',
-      message: `${loc} dilaporkan sebagai temuan baru oleh ${currentUser}.`,
+      title: '⚠️ Laporan temuan baru',
+      message: `📍 ${loc} dilaporkan sebagai temuan baru oleh ${currentUser}.${incidentDetail ? `\n📝 ${incidentDetail}` : ''}`,
       senderName: currentUser,
       senderRole: currentUserRole,
       targetUserIds: getShipRecipients(operationalShipName, { includeAdmins: true, includePic: true, includePetugas: true }),
@@ -8787,10 +8796,11 @@ export function AppProvider({ children }) {
         progress: [progressRecord],
       },
     }));
+    const progressDetail = truncateNotificationDetail(progressRecord.comment);
     appendNotifications([{
       type: 'incident_progress_updated',
-      title: 'Update temuan baru',
-      message: `${incident?.location || 'Temuan'} mendapat update baru dari ${currentUser}.`,
+      title: '🔄 Update temuan baru',
+      message: `📍 ${incident?.location || 'Temuan'} mendapat update baru dari ${currentUser}.${progressDetail ? `\n💬 ${progressDetail}` : ''}`,
       senderName: currentUser,
       senderRole: currentUserRole,
       targetUserIds: getShipRecipients(incident?.shipName || operationalShipName, { includeAdmins: true, includePic: true, includePetugas: true, includeUserIds: incident?.reportedBy ? usersData.filter(user => user.name === incident.reportedBy).map(user => user.id) : [] }),
@@ -9030,8 +9040,8 @@ export function AppProvider({ children }) {
         }
         appendNotifications([{
           type: incident?.isSOS ? 'sos_closed' : 'incident_closed',
-          title: incident?.isSOS ? 'SOS ditutup' : 'Temuan ditutup',
-          message: `${incident?.location || (incident?.isSOS ? 'SOS' : 'Temuan')} telah ditutup oleh ${currentUser}.`,
+          title: incident?.isSOS ? '✅ SOS ditutup' : '✅ Temuan ditutup',
+          message: `📍 ${incident?.location || (incident?.isSOS ? 'SOS' : 'Temuan')} telah ditutup oleh ${currentUser}.`,
           senderName: currentUser,
           senderRole: currentUserRole,
           targetUserIds: getShipRecipients(incident?.shipName || operationalShipName, { includeAdmins: true, includePic: true, includePetugas: true, includeUserIds: incident?.reportedBy ? usersData.filter(user => user.name === incident.reportedBy).map(user => user.id) : [] }),

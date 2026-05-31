@@ -96,7 +96,7 @@ export default function ReportDetailView({ isInline = false }) {
       {selectedReportDetail.photoUrl ? (
         <div className="w-full h-64 bg-[#0b1229] relative shrink-0 cursor-pointer group" onClick={() => setPreviewPhoto({url: selectedReportDetail.photoUrl, author: selectedReportDetail.completedBy, time: syncDateTimeLabel})}>
            <AsyncImage src={selectedReportDetail.heroUrl} fallbackSrc={selectedReportDetail.photoUrl} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" alt="Bukti" />
-           <div className="absolute inset-0 bg-gradient-to-b from-[#070b19]/80 via-transparent to-[#070b19]"></div>
+           {!isAman && <div className="absolute inset-0 bg-gradient-to-b from-[#070b19]/80 via-transparent to-[#070b19]"></div>}
            {!isInline && (
              <button onClick={(e) => { e.stopPropagation(); setSelectedReportDetail(null); }} className="absolute top-4 left-4 p-2 bg-black/50 text-white rounded-full backdrop-blur-md border border-white/20 hover:bg-black/70 transition-colors z-10" aria-label="Tutup laporan"><ChevronDown className="w-6 h-6 rotate-90"/></button>
            )}

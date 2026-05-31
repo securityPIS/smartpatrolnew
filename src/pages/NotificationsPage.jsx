@@ -89,7 +89,7 @@ const NotificationsPage = React.memo(function NotificationsPage() {
                     {notification.type.replaceAll('_', ' ')}
                   </span>
                   <p className="mt-2 text-sm font-bold text-cyan-50">{notification.title}</p>
-                  <p className="mt-1 text-xs text-slate-400 leading-relaxed">{notification.message}</p>
+                  <p className="mt-1 text-xs text-slate-400 leading-relaxed whitespace-pre-line">{notification.message}</p>
                 </div>
                 {isUnread && <span className="mt-1 w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)] shrink-0"></span>}
               </div>

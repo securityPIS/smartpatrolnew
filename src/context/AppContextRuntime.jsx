@@ -7483,10 +7483,19 @@ export function AppProvider({ children }) {
     const { startAt, endAt } = currentShiftSchedule;
     const now = new Date(shiftClock);
     if (now < startAt || now >= endAt) return;
+
+    const previousShiftMeta = getShiftMeta(new Date(startAt.getTime() - 1000));
+    const prevEntry = historyEntries.find(
+      e => e.ship === operationalShipName && e.dateKey === previousShiftMeta.dateKey && e.shiftId === previousShiftMeta.id,
+    );
+    const prevSummaryLine = prevEntry
+      ? `\n\n📋 Hasil patroli sebelumnya:\n✅ Aman: ${prevEntry.summary.aman}\n⚠️ Temuan: ${prevEntry.summary.temuan}\n❌ Missed: ${prevEntry.summary.missed}`
+      : '';
+
     appendNotifications([{
       type: 'shift_started',
-      title: 'Shift patroli dimulai',
-      message: `${currentShiftMeta.label} ${currentShiftMeta.timeRange} untuk ${operationalShipName} telah dimulai.`,
+      title: '⚓ Shift patroli dimulai',
+      message: `🚢 ${currentShiftMeta.label} ${currentShiftMeta.timeRange} untuk ${operationalShipName} telah dimulai.${prevSummaryLine}`,
       senderName: 'Sistem',
       senderRole: 'SYSTEM',
       targetUserIds: getShipRecipients(operationalShipName, { includePic: true, includePetugas: true }),
@@ -7496,7 +7505,7 @@ export function AppProvider({ children }) {
       dedupeKey: `shift-started:${operationalShipName}:${currentShiftMeta.key}`,
       createdAt: startAt.toISOString(),
     }]);
-  }, [appendNotifications, currentShiftMeta, currentShiftSchedule, getShipRecipients, operationalShipName, shiftClock]);
+  }, [appendNotifications, currentShiftMeta, currentShiftSchedule, getShipRecipients, historyEntries, operationalShipName, shiftClock]);
 
   useEffect(() => {
     if (!operationalShipName) return;

@@ -23,6 +23,7 @@ import NotificationsPage from './src/pages/NotificationsPage';
 import UsersPage from './src/pages/UsersPage';
 import ShipsPage from './src/pages/ShipsPage';
 import DailyReportPage from './src/pages/DailyReportPage';
+import SchedulePage from './src/pages/SchedulePage';
 import PatrolCameraModal from './src/components/modals/PatrolCameraModal';
 import PatrolFormModal from './src/components/modals/PatrolFormModal';
 import IncidentFormModal from './src/components/modals/IncidentFormModal';
@@ -182,7 +183,8 @@ function AppShell() {
             {currentPage === 'daily-report' && (canAccessDashboard ? <DailyReportPage /> : <PatrolPage />)}
             {currentPage === 'users' && (isAdmin ? <UsersPage /> : <PatrolPage />)}
             {currentPage === 'ships' && (isAdmin ? <ShipsPage /> : <PatrolPage />)}
-            {!['home', 'incidents', 'history', 'notifications', 'daily-report', 'users', 'ships'].includes(currentPage) && (
+            {currentPage === 'schedule' && (canAccessDashboard ? <SchedulePage /> : <PatrolPage />)}
+            {!['home', 'incidents', 'history', 'notifications', 'daily-report', 'users', 'ships', 'schedule'].includes(currentPage) && (
               canAccessDashboard ? <DailyReportPage /> : <PatrolPage />
             )}
           </PageErrorBoundary>

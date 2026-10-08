@@ -10,6 +10,7 @@ import { sanitizeEmail, sanitizePhone, sanitizeText, sanitizeUrl } from '../../u
 import { ensureSupabaseClient, isSupabaseConfigured } from './app';
 import { uploadCloudDataUrlAsset } from './assets';
 import { enqueueOutboxMutation, loadCacheSnapshot, registerOutboxHandler, saveCacheSnapshot } from './outbox';
+import { normalizePersonnelMonthlyPlan } from '../../utils/personnelSchedule';
 
 const CLOUD_STATE_SCHEMA_VERSION = 1;
 const isCloudSyncAllowedByEnv = import.meta.env.VITE_ENABLE_CLOUD_SYNC !== '0';
@@ -62,6 +63,10 @@ function shipToState(row = {}) {
     personnel: Array.isArray(row.personnel) ? row.personnel : [],
     personnelNextMonth: Array.isArray(row.personnel_next_month) ? row.personnel_next_month : [],
     personnelSchedules: row.personnel_schedules || {},
+    // Hanya bila kolom ada (migration sudah diterapkan) agar rencana lokal tidak tertimpa objek kosong.
+    ...(Object.prototype.hasOwnProperty.call(row, 'personnel_monthly_plan')
+      ? { personnelMonthlyPlan: normalizePersonnelMonthlyPlan(row.personnel_monthly_plan) }
+      : {}),
     customCheckpoints: Array.isArray(row.custom_checkpoints) ? row.custom_checkpoints : [],
     documents: Array.isArray(row.documents) ? row.documents : [],
     sosRecipientShipIds: Array.isArray(row.sos_recipient_ship_ids) ? row.sos_recipient_ship_ids : [],
@@ -192,10 +197,27 @@ function shipToRow(ship = {}) {
     personnel: Array.isArray(ship.personnel) ? ship.personnel : [],
     personnel_next_month: Array.isArray(ship.personnelNextMonth) ? ship.personnelNextMonth : [],
     personnel_schedules: ship.personnelSchedules || {},
+    personnel_monthly_plan: normalizePersonnelMonthlyPlan(ship.personnelMonthlyPlan),
     custom_checkpoints: Array.isArray(ship.customCheckpoints) ? ship.customCheckpoints : [],
     documents: Array.isArray(ship.documents) ? ship.documents : [],
     sos_recipient_ship_ids: Array.isArray(ship.sosRecipientShipIds) ? ship.sosRecipientShipIds : [],
   };
+}
+
+let isPersonnelPlanColumnMissing = false;
+
+function isMissingPersonnelPlanColumnError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  return message.includes('personnel_monthly_plan') && (message.includes('column') || error?.code === 'PGRST204');
+}
+
+function omitPersonnelPlanColumn(row) {
+  const { personnel_monthly_plan: _omitted, ...rest } = row;
+  return rest;
+}
+
+export function isPersonnelPlanCloudUnavailable() {
+  return isPersonnelPlanColumnMissing;
 }
 
 function isRowLevelSecurityError(error) {
@@ -347,6 +369,10 @@ async function hydrateStateFromSql() {
     }
   }
 
+  if (Array.isArray(ships.data) && ships.data.length > 0) {
+    isPersonnelPlanColumnMissing = !Object.prototype.hasOwnProperty.call(ships.data[0], 'personnel_monthly_plan');
+  }
+
   const checkpointsByShip = {};
   (reports.data || []).forEach((row) => {
     const shipId = row.ship_id || row.payload?.shipId;
@@ -473,7 +499,16 @@ async function writeStateToSql(state, options = {}) {
     if (error && !String(error.message || '').toLowerCase().includes('row-level security')) throw error;
   }
   if (shipRows.length > 0) {
-    const { error } = await supabase.from('ships').upsert(shipRows, { onConflict: 'id' });
+    let { error } = await supabase.from('ships').upsert(
+      isPersonnelPlanColumnMissing ? shipRows.map(omitPersonnelPlanColumn) : shipRows,
+      { onConflict: 'id' },
+    );
+    if (error && !isPersonnelPlanColumnMissing && isMissingPersonnelPlanColumnError(error)) {
+      // Migration 20261008120000 belum diterapkan: tetap sinkronkan data kapal lain tanpa kolom rencana.
+      isPersonnelPlanColumnMissing = true;
+      console.warn('Kolom ships.personnel_monthly_plan belum ada; jadwal bulan depan belum tersimpan ke cloud.');
+      ({ error } = await supabase.from('ships').upsert(shipRows.map(omitPersonnelPlanColumn), { onConflict: 'id' }));
+    }
     if (error && !String(error.message || '').toLowerCase().includes('row-level security')) throw error;
   }
 

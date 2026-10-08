@@ -18,6 +18,16 @@ import { saveImagePhotoSet } from '../utils/imageVariants';
 import { checkStorageQuota } from '../utils/storageQuota';
 import { assignUserToExclusiveShip, reconcileUserShipAssignments, removeUserFromShipAssignment, resolveExplicitOverride, shouldDeferPetugasFleetValidation } from '../utils/userManagement';
 import {
+  assignToMonthPlan,
+  diffMonths,
+  getJakartaDateKey,
+  getMonthKey,
+  normalizePersonnelMonthlyPlan,
+  releaseFromMonthPlan,
+  validateSchedulePeriod,
+} from '../utils/personnelSchedule';
+import { applyPersonnelMonthlyPlanOnServer } from '../services/backend/personnelPlan';
+import {
   addNativeNetworkStatusListener,
   captureNativeCameraOrGallery,
   getNativeGeolocationPosition,
@@ -357,6 +367,7 @@ function normalizeShipRecord(ship = {}) {
       }))
       : [],
     sosRecipientShipIds,
+    personnelMonthlyPlan: normalizePersonnelMonthlyPlan(ship?.personnelMonthlyPlan),
     defaultCheckpointsInitialized: true,
     // Pastikan checklist wajib selalu ada pada semua kapal, termasuk data lama yang sudah tersimpan.
     customCheckpoints: initializeShipCheckpointDefinitions(ship?.customCheckpoints),
@@ -8441,6 +8452,113 @@ export function AppProvider({ children }) {
     setShowAssignPopup(false);
     setAssignPopupData(null);
   }, [activeShip, assignPopupData, isAdmin, requestCloudSync, shipsData, syncManagedUserOperationalAccess, updateUserRecordLocally, usersData]);
+  /*
+  Jadwal Penugasan (SchedulePage). Bulan berjalan memakai penugasan operasional (personnel) supaya
+  akses patroli petugas langsung ikut berubah; bulan depan disimpan di personnelMonthlyPlan dan
+  diterapkan server (apply_personnel_monthly_plan) saat bulannya tiba.
+  */
+  const getScheduleClock = useCallback(() => {
+    const today = getJakartaDateKey(getTrustedDate());
+    return { today, currentMonth: getMonthKey(today) };
+  }, []);
+
+  const handleScheduleAssign = useCallback(async ({ shipId, userId, monthKey, startDate = '', endDate = '', skipValidation = false } = {}) => {
+    if (!isAdmin) return { ok: false, error: 'Hanya admin yang dapat mengatur jadwal penugasan.' };
+    const { today, currentMonth } = getScheduleClock();
+    const targetShip = shipsData.find((ship) => ship.id === shipId) || null;
+    const targetUser = usersData.find((user) => user.id === userId) || null;
+    if (!targetShip || !targetUser) return { ok: false, error: 'Data kapal atau petugas tidak ditemukan.' };
+
+    const safeStart = sanitizeText(startDate || '', 10);
+    const safeEnd = sanitizeText(endDate || '', 10);
+    if (!skipValidation) {
+      const validationError = validateSchedulePeriod({ monthKey, currentMonth, today, startDate: safeStart, endDate: safeEnd });
+      if (validationError) return { ok: false, error: validationError };
+    }
+
+    const offset = diffMonths(currentMonth, monthKey);
+    if (offset < 0) return { ok: false, error: 'Bulan yang sudah lewat hanya bisa dilihat.' };
+    const mutationMeta = createLocalEntityUpdateMeta();
+
+    if (offset > 0) {
+      setShipsData(assignToMonthPlan(shipsData, {
+        shipId,
+        userId,
+        monthKey,
+        startDate: safeStart,
+        endDate: safeEnd,
+        currentMonth,
+        validUserIds: new Set(usersData.map((user) => user.id)),
+        mutationMeta,
+      }));
+      requestCloudSync('urgent');
+      return { ok: true };
+    }
+
+    // Bulan berjalan: mulai nanti (di bulan ini) masuk antrean Next Assignment, sisanya langsung on duty.
+    const startsLater = Boolean(safeStart && safeStart > today);
+    setShipsData(assignUserToExclusiveShip(shipsData, {
+      userId,
+      targetShipId: shipId,
+      scheduleType: startsLater ? 'next' : 'current',
+      schedule: { startDate: safeStart, endDate: safeEnd, isTBC: false },
+      mutationMeta,
+    }));
+
+    if (startsLater) {
+      requestCloudSync('urgent');
+      return { ok: true };
+    }
+
+    updateUserRecordLocally(userId, { shipAssigned: targetShip.name, status: 'active' });
+    requestCloudSync('urgent');
+    await syncManagedUserOperationalAccess(targetUser, { shipAssigned: targetShip.name, status: 'active' });
+    return { ok: true };
+  }, [getScheduleClock, isAdmin, requestCloudSync, shipsData, syncManagedUserOperationalAccess, updateUserRecordLocally, usersData]);
+
+  const handleScheduleRelease = useCallback(async ({ shipId, userId, monthKey } = {}) => {
+    if (!isAdmin) return { ok: false, error: 'Hanya admin yang dapat mengatur jadwal penugasan.' };
+    const { currentMonth } = getScheduleClock();
+    const targetUser = usersData.find((user) => user.id === userId) || null;
+    const offset = diffMonths(currentMonth, monthKey);
+    if (offset < 0) return { ok: false, error: 'Bulan yang sudah lewat hanya bisa dilihat.' };
+    const mutationMeta = createLocalEntityUpdateMeta();
+
+    if (offset > 0) {
+      setShipsData(releaseFromMonthPlan(shipsData, {
+        shipId,
+        userId,
+        monthKey,
+        currentMonth,
+        validUserIds: new Set(usersData.map((user) => user.id)),
+        mutationMeta,
+      }));
+      requestCloudSync('urgent');
+      return { ok: true };
+    }
+
+    const afterCurrent = removeUserFromShipAssignment(shipsData, { userId, targetShipId: shipId, scheduleType: 'current', mutationMeta });
+    const afterNext = removeUserFromShipAssignment(afterCurrent.ships, { userId, targetShipId: shipId, scheduleType: 'next', mutationMeta });
+    setShipsData(afterNext.ships);
+    const remainingShipName = afterNext.remainingCurrentAssignment?.shipName || '';
+    updateUserRecordLocally(userId, {
+      shipAssigned: remainingShipName || null,
+      status: remainingShipName ? 'active' : 'off-duty',
+    });
+    requestCloudSync('urgent');
+    await syncManagedUserOperationalAccess(targetUser, {
+      shipAssigned: remainingShipName,
+      status: remainingShipName ? 'active' : 'off-duty',
+    });
+    return { ok: true };
+  }, [getScheduleClock, isAdmin, requestCloudSync, shipsData, syncManagedUserOperationalAccess, updateUserRecordLocally, usersData]);
+
+  // Best effort & non-blocking: server menerapkan pergantian bulan bila cron belum sempat jalan.
+  const refreshPersonnelPlanOnServer = useCallback(async () => {
+    if (!isAdmin || !hasOperationalCloudAccess) return null;
+    return applyPersonnelMonthlyPlanOnServer();
+  }, [hasOperationalCloudAccess, isAdmin]);
+
   const handleAddShipCp = useCallback(() => {
     if (!isAdmin || !activeShip) return;
     const safeName = sanitizeText(newShipCp.name, 80);
@@ -10764,6 +10882,9 @@ export function AppProvider({ children }) {
     assignPopupData,
     setAssignPopupData,
     handleConfirmAssign,
+    handleScheduleAssign,
+    handleScheduleRelease,
+    refreshPersonnelPlanOnServer,
     isEditingShipInfo,
     setIsEditingShipInfo,
     editShipInfoData,
@@ -10807,6 +10928,9 @@ export function AppProvider({ children }) {
     handleConfirmAssign,
     handleDeleteShip,
     handleDownloadShipDoc,
+    handleScheduleAssign,
+    handleScheduleRelease,
+    refreshPersonnelPlanOnServer,
     handleRemoveCheckpointFromForm,
     handleSaveShip,
     handleShipDocUpload,

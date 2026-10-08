@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAuth, useRole, useShips, useUI, useUsers } from '../context/AppContextRuntime';
-import { Shield, Ship, UserCog, Moon, Sun, LogOut, Settings, Wifi, WifiOff, Users, Anchor, BarChart3 } from 'lucide-react';
+import { Shield, Ship, UserCog, Moon, Sun, LogOut, Settings, Wifi, WifiOff, Users, Anchor, BarChart3, CalendarRange } from 'lucide-react';
 
 const Header = React.memo(function Header() {
   const { currentUser, currentUserRecord, currentUserRole, isAdmin, isPic } = useRole();
@@ -67,6 +67,18 @@ const Header = React.memo(function Header() {
                   className="w-full text-left px-4 py-2 text-xs font-bold text-cyan-300 flex items-center gap-2 hover:bg-cyan-900/50"
                 >
                   <BarChart3 className="w-4 h-4" /> Daily Report
+                </button>
+              )}
+              {canAccessDashboard && (
+                <button
+                  onClick={() => {
+                    setActiveShipId(null);
+                    setCurrentPage('schedule');
+                    setShowSettingsDropdown(false);
+                  }}
+                  className="w-full text-left px-4 py-2 text-xs font-bold text-cyan-300 flex items-center gap-2 hover:bg-cyan-900/50"
+                >
+                  <CalendarRange className="w-4 h-4" /> Jadwal Penugasan
                 </button>
               )}
               {isAdmin && (

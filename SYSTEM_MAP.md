@@ -62,6 +62,26 @@ SOSButton -> activeSOSAlert lokal
   -> perangkat lain menerima perubahan saat app aktif via Realtime
 ```
 
+### Jadwal Penugasan Petugas (per kapal per bulan)
+
+```
+Header ▸ Jadwal Penugasan -> SchedulePage (Admin kelola, PIC lihat)
+  -> utils/personnelSchedule.buildFleetRoster(bulan)
+       bulan lalu   : ships.personnel_monthly_plan.months[M] (riwayat, read-only)
+       bulan ini    : ships.personnel (+ personnel_next_month yang mulai bulan ini)
+       bulan depan  : months[M] bila direncanakan, else warisi bulan sebelumnya
+                      (tanpa yang periodenya selesai) + Next Assignment lama yg mulai di M
+  -> AppContextRuntime.handleScheduleAssign / handleScheduleRelease
+       bulan ini    : assignUserToExclusiveShip / removeUserFromShipAssignment + sync akses
+       bulan depan  : assignToMonthPlan / releaseFromMonthPlan (bekukan rencana seluruh armada)
+  -> RPC + pg_cron 00:05 WIB public.apply_personnel_monthly_plan()
+       pergantian bulan, mulai tugas terjadwal, rekonsiliasi profiles PETUGAS
+```
+
+Periode jaga opsional, harus di dalam bulan yang dipilih, tidak boleh sebelum hari ini (WIB).
+Migration: `supabase/migrations/20261008120000_personnel_monthly_plan.sql`. Sebelum diterapkan,
+sync kapal tetap jalan tanpa kolom rencana (fallback di `cloudState.writeStateToSql`).
+
 ### Trusted Time
 
 ```
@@ -106,6 +126,8 @@ Pencabutan akun (disabled/rejected/restricted) tetap ditegakkan jalur `resolveOp
 | `src/services/backend/assets.js` | Upload Supabase Storage + signed URL. |
 | `src/services/backend/outbox.js` | IndexedDB outbox mutation retry. |
 | `src/services/time/trustedTime.js` | Trusted time anchor memakai Supabase Edge Function. |
+| `src/pages/SchedulePage.jsx` | Halaman Jadwal Penugasan petugas per kapal per bulan. |
+| `src/utils/personnelSchedule.js` | Logika murni rencana bulanan (roster, assign/lepas, validasi tanpa backdate). |
 | `supabase/migrations/202605220001_init_smartpatrol_sql.sql` | Schema Postgres, RLS, Storage policies, Realtime publication. |
 | `supabase/functions/*` | Edge Functions server-time, access, approval, revoke, upload URL, provision user. |
 | `scripts/setup-admin.mjs` | Bootstrap admin pertama via service role. |

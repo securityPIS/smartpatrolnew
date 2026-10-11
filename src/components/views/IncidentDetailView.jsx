@@ -11,7 +11,7 @@ import { useIncidents, useReports, useRole, useShips } from '../../context/AppCo
 import { ChevronDown, AlertTriangle, CheckCircle2, Camera, X, Plus, FileText, Trash2, Images, Pencil, Save, MapPin, ExternalLink } from 'lucide-react';
 import AsyncImage from '../AsyncImage';
 import { TimeAuditPills, TimeAuditRecordCard } from '../TimeAuditStatus';
-import { SECURITY_ASSIGNEE_ID, buildFollowUpLogItems, formatFollowUpTimestamp, useIncidentClosure, useIncidentFollowUps } from '../incidentFollowUp/followUpStore';
+import { REPORTER_ROLE_ID, SECURITY_ASSIGNEE_ID, buildFollowUpLogItems, formatFollowUpTimestamp, useIncidentClosure, useIncidentFollowUps } from '../incidentFollowUp/followUpStore';
 import { FollowUpAssignCard, FollowUpRoleSwitcher, FollowUpSectionList, FollowUpToast } from '../incidentFollowUp/FollowUpPanels';
 
 function normalizeIncidentMetaKeyPart(value) {
@@ -107,12 +107,11 @@ function getHistoryItemTimestamp(item) {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
-// Gabungkan riwayat progress temuan dengan log tindak lanjut (dummy), urut kronologis.
+// Gabungkan riwayat progress temuan dengan log tindak lanjut (dummy), terbaru paling atas.
 function mergeIncidentHistoryItems(progressItems = [], followUpLogItems = []) {
-  if (followUpLogItems.length === 0) return progressItems;
   return [...progressItems, ...followUpLogItems]
     .map((item, index) => ({ item, index }))
-    .sort((left, right) => (getHistoryItemTimestamp(left.item) - getHistoryItemTimestamp(right.item)) || (left.index - right.index))
+    .sort((left, right) => (getHistoryItemTimestamp(right.item) - getHistoryItemTimestamp(left.item)) || (right.index - left.index))
     .map(({ item }) => {
       if (!item.isFollowUpLog) return item;
       const stamp = formatFollowUpTimestamp(item.createdAt);
@@ -265,6 +264,9 @@ export default function IncidentDetailView({ isInline = false }) {
   const incidentMapsHref = incidentMapConfig ? `https://www.google.com/maps?q=${incidentMapsQuery}` : '#';
   const followUpSecurityName = (isPic && currentUserRecord?.name) || 'PIC Security';
   const followUpReporterName = selectedIncident.reportedBy || 'Petugas Pelapor';
+  // Update riwayat temuan hanya untuk Petugas Pelapor & PIC Security (role simulasi); SOS tetap ikut izin asli.
+  const canAddHistoryUpdate = canManageDetailActions
+    && (!showFollowUpFeature || followUpSimRole === SECURITY_ASSIGNEE_ID || followUpSimRole === REPORTER_ROLE_ID);
   const historyItems = mergeIncidentHistoryItems(
     progressItems,
     showFollowUpFeature ? buildFollowUpLogItems(followUps, followUpSecurityName, followUpClosure) : [],
@@ -597,7 +599,20 @@ export default function IncidentDetailView({ isInline = false }) {
             )}
 
             <div className="pt-2">
-              <h4 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4 flex items-center gap-2"><FileText className="w-4 h-4" /> RIWAYAT UPDATE</h4>
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h4 className="text-xs font-bold text-cyan-400 uppercase tracking-widest flex items-center gap-2"><FileText className="w-4 h-4" /> RIWAYAT UPDATE</h4>
+                {incidentStatus !== 'closed' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowUpdateForm(true)}
+                    disabled={!canAddHistoryUpdate}
+                    title={canAddHistoryUpdate ? 'Tambah update' : 'Hanya Petugas Pelapor dan PIC Security yang dapat menambah update'}
+                    className="px-3 py-1.5 bg-emerald-600/10 border border-emerald-500/30 text-emerald-400 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 hover:bg-emerald-600 hover:text-white transition-all active:scale-95 disabled:opacity-40 disabled:hover:bg-emerald-600/10 disabled:hover:text-emerald-400 disabled:cursor-not-allowed"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Update
+                  </button>
+                )}
+              </div>
               <div className="space-y-5 border-l-2 border-cyan-800 ml-2 pl-5">
                 {historyItems.map((prog, idx) => (
                   <div key={prog.id || idx} className="relative">
@@ -620,17 +635,6 @@ export default function IncidentDetailView({ isInline = false }) {
               </div>
             </div>
 
-            {canManageDetailActions && (
-              canManageIncident(selectedIncident) ? (
-                <div className="pt-2">
-                  <button onClick={() => setShowUpdateForm(true)} className="w-full py-4 bg-emerald-600/10 border border-emerald-500/30 text-emerald-400 rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-emerald-600 hover:text-white transition-all shadow-lg active:scale-[0.98]">
-                    <Plus className="w-5 h-5" /> Tambah Update
-                  </button>
-                </div>
-              ) : (
-                <div className="bg-[#0b1229] p-4 rounded-xl border border-amber-900/50 mt-6"><p className="text-xs text-amber-300 leading-relaxed">Update terbatas.</p></div>
-              )
-            )}
           </div>
         )}
       </div>

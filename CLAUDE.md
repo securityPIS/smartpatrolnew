@@ -33,6 +33,16 @@ harus diam ~5 menit + restart app baru bisa submit lagi.
 - Event auth dari resume WebView (UID sama) jangan diperlakukan seperti login baru.
 - Sesi hangat → re-validasi di background, jangan blok UI.
 
+## Pola bug "mental logout sendiri" (PIC/Admin, browser HP)
+Log Supabase: tidak ada refresh gagal/logout server, tapi user login ulang berkali-kali → reset
+sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
+- Validator sesi dulu me-reset "Sesi login tidak lagi valid." SEBELUM guard `firebaseAuthReady`/
+  `authAccessBusy` → saat cold start / sinkron data user (ID sesaat tak cocok) sesi sehat ditendang.
+  Sekarang jalur Supabase menunggu auth siap & akses definitif; user lokal yang sesaat hilang → tunggu.
+- Setiap logout otomatis dicatat (`src/utils/autoLogoutLog.js`, localStorage
+  `smartpatrol:auto-logout-log`, 20 entri + konteks state) dan tampil di LoginPage ("Anda keluar
+  otomatis" + kode). Minta user kirim kode itu bila masih terjadi.
+
 ## Workflow git
 - Develop di branch fitur, lalu merge ke `main` (fast-forward bila bisa: `git fetch` →
   `git merge --ff-only`), push `origin main`. Jangan buat PR kecuali diminta.

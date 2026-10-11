@@ -6,13 +6,28 @@ Main Functions: Login user operasional, kirim registrasi publik, dan upload foto
 Side Effects: Memicu handler auth/register context serta menyimpan foto onboarding ke state form.
 */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AppContextRuntime';
-import { Shield, Ship, Eye, EyeOff, Camera } from 'lucide-react';
+import { Shield, Ship, Eye, EyeOff, Camera, AlertTriangle, X } from 'lucide-react';
+import { acknowledgeLatestAutoLogout, readAutoLogoutLog } from '../utils/autoLogoutLog';
 import AsyncImage from '../components/AsyncImage';
+
+function formatAutoLogoutTime(isoValue) {
+  const date = new Date(isoValue);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' });
+}
 
 export default function LoginPage() {
   const { authMode, setAuthMode, authBusy, authError, setAuthError, authNotice, setAuthNotice, authForm, setAuthForm, handleLogin, handleRegister, handleAuthPhotoUpload } = useAuth();
+  // Alasan logout otomatis terakhir (diagnostik "mental logout sendiri"); disembunyikan setelah ditutup.
+  const [latestAutoLogout, setLatestAutoLogout] = useState(() => {
+    const [latestEntry] = readAutoLogoutLog();
+    return latestEntry && !latestEntry.acknowledged ? latestEntry : null;
+  });
+  // Tandai sudah dilihat begitu tampil agar tidak muncul lagi di login berikutnya.
+  useEffect(() => { acknowledgeLatestAutoLogout(); }, []);
+  const dismissAutoLogout = () => setLatestAutoLogout(null);
 
   const [showPassword, setShowPassword] = React.useState(false);
   const [invalidFields, setInvalidFields] = React.useState({});
@@ -156,7 +171,20 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {authNotice && <div className="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 font-medium">{authNotice}</div>}
+        {latestAutoLogout && (
+          <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/40 rounded-xl text-xs text-amber-200" role="alert">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="font-black uppercase tracking-widest text-[10px] text-amber-400">Anda keluar otomatis</p>
+                <p className="font-medium mt-1">{latestAutoLogout.message}</p>
+                <p className="text-[10px] text-amber-300/70 mt-1">Kode: {latestAutoLogout.code} · {formatAutoLogoutTime(latestAutoLogout.at)}</p>
+              </div>
+              <button type="button" onClick={dismissAutoLogout} className="p-1 text-amber-400/80 hover:text-amber-200" aria-label="Tutup pemberitahuan"><X className="w-4 h-4" /></button>
+            </div>
+          </div>
+        )}
+        {authNotice && authNotice !== latestAutoLogout?.message && <div className="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 font-medium">{authNotice}</div>}
         {authError && <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300 font-medium">{authError}</div>}
 
         <div className="space-y-3.5">

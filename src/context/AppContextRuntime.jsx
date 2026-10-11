@@ -16,6 +16,7 @@ import { sanitizeEmail, sanitizeMultilineText, sanitizePhone, sanitizeText, sani
 import { loadImageFromDB, saveImageToDB } from '../utils/imageStore';
 import { saveImagePhotoSet } from '../utils/imageVariants';
 import { checkStorageQuota } from '../utils/storageQuota';
+import { recordAutoLogout } from '../utils/autoLogoutLog';
 import { assignUserToExclusiveShip, reconcileUserShipAssignments, removeUserFromShipAssignment, resolveExplicitOverride, shouldDeferPetugasFleetValidation } from '../utils/userManagement';
 import {
   assignToMonthPlan,
@@ -10437,7 +10438,15 @@ export function AppProvider({ children }) {
     // reset — mencegah logout liar saat koneksi flaky / baru pulih (reconnect).
     const currentUid = sanitizeText(firebaseAuthUser?.uid || '', 160);
     if (authAccessResolvedUid !== currentUid) return;
-    resetAuthSession('Sesi cloud Anda telah berakhir. Silakan login kembali.');
+    const message = 'Sesi cloud Anda telah berakhir. Silakan login kembali.';
+    recordAutoLogout('no-supabase-session', message, {
+      firebaseAuthReady,
+      hasFirebaseUser: false,
+      isOffline,
+      sessionUserInList: usersData.some(user => user.id === sessionUserId),
+      usersCount: usersData.length,
+    });
+    resetAuthSession(message);
   }, [authAccessBusy, authAccessResolvedUid, authAccessOfflineUid, authBusy, firebaseAuthReady, firebaseAuthUser, isOffline, resetAuthSession, sessionUserId, usersData]);
   useEffect(() => {
     if (!isAdmin || !hasOperationalCloudAccess) {
@@ -10490,15 +10499,36 @@ export function AppProvider({ children }) {
   useEffect(() => {
     if (!sessionUserId) return;
     const activeUser = currentUserRecord || usersData.find(user => user.id === sessionUserId);
-    if (!activeUser) {
-      resetAuthSession('Sesi login tidak lagi valid.');
-      return;
-    }
+    const currentUid = sanitizeText(firebaseAuthUser?.uid || '', 160);
+    const buildLogoutContext = () => ({
+      firebaseAuthReady,
+      hasFirebaseUser: Boolean(firebaseAuthUser),
+      accessStatus: authAccessStatus,
+      accessEnabled: authAccessEnabled,
+      accessDefinitive: authAccessResolvedUid === currentUid,
+      isOffline,
+      hasCurrentUserRecord: Boolean(currentUserRecord),
+      sessionUserInList: usersData.some(user => user.id === sessionUserId),
+      usersCount: usersData.length,
+      role: activeUser?.role || '',
+    });
+    const autoReset = (code, message) => {
+      recordAutoLogout(code, message, buildLogoutContext());
+      resetAuthSession(message);
+    };
+    const autoLogout = (code, message) => {
+      recordAutoLogout(code, message, buildLogoutContext());
+      handleLogout(message);
+    };
 
     if (isFirebaseAuthEnabled) {
+      // Jangan putuskan apa pun sebelum auth Supabase siap & resolusi akses selesai.
+      // Sebelumnya cek "user tidak ditemukan" berjalan duluan tanpa guard ini, sehingga
+      // saat cold start / sinkronisasi data user (ID user sesaat tidak cocok) sesi langsung
+      // di-reset walau sesi Supabase masih sehat.
       if (!firebaseAuthReady || authBusy || authAccessBusy) return;
       if (!firebaseAuthUser || !authAccessEnabled) {
-        if (isOffline && activeUser) {
+        if (isOffline) {
           const offlineUid = sanitizeText(activeUser?.firebaseUid || '', 160);
           if (offlineUid && authAccessOfflineUid !== offlineUid) {
             setAuthAccessOfflineUid(offlineUid);
@@ -10508,27 +10538,32 @@ export function AppProvider({ children }) {
         // Reset HANYA saat jawaban akses DEFINITIF (resolvedUid === currentUid). Resolusi
         // gagal jaringan (authAccessOfflineUid di-set) atau masih pending JANGAN memicu
         // logout — mencegah tendangan saat koneksi baru pulih (reconnect).
-        const currentUid = sanitizeText(firebaseAuthUser?.uid || '', 160);
         if (authAccessResolvedUid !== currentUid) return;
-        resetAuthSession('Sesi cloud Anda telah berakhir. Silakan login kembali.');
+        autoReset('cloud-session-ended', 'Sesi cloud Anda telah berakhir. Silakan login kembali.');
         return;
       }
+      // Sesi Supabase sehat & akses aktif: currentUserRecord dibangun dari data akses server,
+      // jadi user yang "hilang" di sini berarti data lokal belum sinkron — tunggu, jangan kick.
+      if (!activeUser) return;
       if (authAccessStatus === 'restricted') {
-        handleLogout('Akses operasional Anda sedang nonaktif. Hubungi admin untuk assignment ulang.');
+        autoLogout('access-restricted', 'Akses operasional Anda sedang nonaktif. Hubungi admin untuk assignment ulang.');
         return;
       }
       if (authAccessStatus === 'rejected') {
-        handleLogout('Registrasi Anda ditolak admin operasional.');
+        autoLogout('registration-rejected', 'Registrasi Anda ditolak admin operasional.');
         return;
       }
       if (authAccessStatus === 'pending') {
-        handleLogout('Registrasi Anda masih menunggu approval admin.');
+        autoLogout('registration-pending', 'Registrasi Anda masih menunggu approval admin.');
         return;
       }
+    } else if (!activeUser) {
+      autoReset('session-user-missing', 'Sesi login tidak lagi valid.');
+      return;
     }
 
     if (!canUserAccessApplication(activeUser)) {
-      handleLogout('Petugas off-duty atau tanpa penugasan kapal tidak bisa tetap login.');
+      autoLogout('petugas-off-duty', 'Petugas off-duty atau tanpa penugasan kapal tidak bisa tetap login.');
       return;
     }
     if (isWaitingForAssignedFleetSync) {
@@ -10538,9 +10573,9 @@ export function AppProvider({ children }) {
     // sesaat null walau petugas masih terdaftar. Jangan kick — tunggu ships terisi.
     if (!shipsData?.length) return;
     if (activeUser.role === ACCESS_ROLES.PETUGAS && !assignedShipForCurrentUser) {
-      handleLogout('Petugas yang tidak lagi terdaftar di armada aktif tidak bisa tetap login.');
+      autoLogout('petugas-no-fleet', 'Petugas yang tidak lagi terdaftar di armada aktif tidak bisa tetap login.');
     }
-  }, [assignedShipForCurrentUser, authAccessBusy, authAccessEnabled, authAccessOfflineUid, authAccessStatus, authBusy, currentUserRecord, firebaseAuthReady, firebaseAuthUser, handleLogout, isOffline, isWaitingForAssignedFleetSync, resetAuthSession, sessionUserId, shipsData, usersData]);
+  }, [assignedShipForCurrentUser, authAccessBusy, authAccessEnabled, authAccessOfflineUid, authAccessResolvedUid, authAccessStatus, authBusy, currentUserRecord, firebaseAuthReady, firebaseAuthUser, handleLogout, isOffline, isWaitingForAssignedFleetSync, resetAuthSession, sessionUserId, shipsData, usersData]);
   useEffect(() => { if (!currentUserRecord) return; if (!isAdmin && (currentPage === 'users' || currentPage === 'ships' || currentPage === 'daily-report')) { setCurrentPage('home'); setActiveShipId(null); setShowShipForm(false); setShowShipDocForm(false); setShowUserForm(false); setSelectedUser(null); } }, [currentPage, currentUserRecord, isAdmin]);
   useEffect(() => { if (activeShipId) return; setShowShipDocForm(false); }, [activeShipId]);
   useEffect(() => {

@@ -170,7 +170,7 @@ test('runtime auth mempertahankan sesi patroli saat auth-null offline', () => {
   );
   assert.match(
     appContextSource,
-    /if \(isOffline\) \{[\s\S]*?setAuthAccessOfflineUid\(offlineUid\);[\s\S]*?return;[\s\S]*?resetAuthSession\('Sesi cloud Anda telah berakhir/,
+    /if \(isOffline\) \{[\s\S]*?setAuthAccessOfflineUid\(offlineUid\);[\s\S]*?return;[\s\S]*?(?:resetAuthSession\(|autoReset\('[^']+', )'Sesi cloud Anda telah berakhir/,
     'validator tidak boleh reset sesi cloud ketika device sedang offline dan masih ada user lokal aktif',
   );
 });
@@ -180,7 +180,7 @@ test('validator sesi hanya reset saat resolusi akses DEFINITIF (anti tendangan r
   // untuk UID aktif. Resolusi gagal jaringan (authAccessOfflineUid di-set) saat baru pulih
   // koneksi TIDAK boleh memicu reset — itulah penyebab logout "saat back online".
   const definitiveGuards = appContextSource.match(
-    /if \(authAccessResolvedUid !== currentUid\) return;\s*\n\s*resetAuthSession\('Sesi cloud Anda telah berakhir/g,
+    /if \(authAccessResolvedUid !== currentUid\) return;\s*\n\s*(?:resetAuthSession\(|autoReset\('[^']+', |const message = )'Sesi cloud Anda telah berakhir/g,
   ) || [];
   assert.equal(
     definitiveGuards.length,
@@ -197,6 +197,22 @@ test('validator sesi hanya reset saat resolusi akses DEFINITIF (anti tendangan r
     /if \(!shipsData\?\.length\) return;/,
     'validasi armada petugas harus ditunda saat ships belum termuat agar tidak kick di window reconnect',
   );
+});
+
+test('validator tidak reset "Sesi login tidak lagi valid" sebelum auth Supabase siap', () => {
+  // Cek "user tidak ditemukan" dulu berjalan sebelum guard firebaseAuthReady/authAccessBusy,
+  // sehingga cold start / sinkronisasi data user menendang sesi Supabase yang masih sehat.
+  assert.match(
+    appContextSource,
+    /if \(isFirebaseAuthEnabled\) \{[\s\S]*?if \(!firebaseAuthReady \|\| authBusy \|\| authAccessBusy\) return;[\s\S]*?if \(!activeUser\) return;[\s\S]*?\} else if \(!activeUser\) \{\s*\n\s*autoReset\('session-user-missing'/,
+    'jalur Supabase harus menunggu auth siap dan tidak me-reset saat user lokal sesaat tidak ditemukan',
+  );
+  assert.doesNotMatch(
+    appContextSource,
+    /if \(!sessionUserId\) return;\s*\n\s*const activeUser = [^\n]*\n\s*if \(!activeUser\) \{\s*\n\s*resetAuthSession\('Sesi login tidak lagi valid/,
+    'reset tanpa guard di awal validator (penyebab mental logout) tidak boleh kembali',
+  );
+  assert.match(appContextSource, /recordAutoLogout\(code, message, buildLogoutContext\(\)\)/, 'logout otomatis harus dicatat untuk diagnosis');
 });
 
 test('resolusi akses sembuh sendiri setelah reconnect (checkpoint tidak hilang)', () => {

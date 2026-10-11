@@ -11,8 +11,8 @@ import { useIncidents, useReports, useRole, useShips } from '../../context/AppCo
 import { ChevronDown, AlertTriangle, CheckCircle2, Camera, X, Plus, FileText, Trash2, Images, Pencil, Save, MapPin, ExternalLink } from 'lucide-react';
 import AsyncImage from '../AsyncImage';
 import { TimeAuditPills, TimeAuditRecordCard } from '../TimeAuditStatus';
-import { FOLLOW_UP_STATUS, REPORTER_ROLE_ID, SECURITY_ASSIGNEE_ID, buildFollowUpLogItems, formatFollowUpTimestamp, useIncidentClosure, useIncidentFollowUps } from '../incidentFollowUp/followUpStore';
-import { CloseIncidentModal, FollowUpAssignCard, FollowUpRoleSwitcher, FollowUpSectionList, FollowUpToast } from '../incidentFollowUp/FollowUpPanels';
+import { SECURITY_ASSIGNEE_ID, buildFollowUpLogItems, formatFollowUpTimestamp, useIncidentClosure, useIncidentFollowUps } from '../incidentFollowUp/followUpStore';
+import { FollowUpAssignCard, FollowUpRoleSwitcher, FollowUpSectionList, FollowUpToast } from '../incidentFollowUp/FollowUpPanels';
 
 function normalizeIncidentMetaKeyPart(value) {
   return String(value || '')
@@ -196,7 +196,6 @@ export default function IncidentDetailView({ isInline = false }) {
   const [activeInfoEditor, setActiveInfoEditor] = useState(null);
   const [incidentInfoForm, setIncidentInfoForm] = useState(() => createIncidentInfoState(null));
   const [isHeaderExpanded, setIsHeaderExpanded] = useState(false);
-  const [showCloseIncidentForm, setShowCloseIncidentForm] = useState(false);
   const [followUpSimRole, setFollowUpSimRole] = useState(SECURITY_ASSIGNEE_ID);
   const [followUpToast, setFollowUpToast] = useState(null);
   const followUps = useIncidentFollowUps(selectedIncident?.id);
@@ -208,7 +207,6 @@ export default function IncidentDetailView({ isInline = false }) {
     setIncidentInfoForm(createIncidentInfoState(selectedIncident));
     setActiveInfoEditor(null);
     setIsHeaderExpanded(false);
-    setShowCloseIncidentForm(false);
   }, [selectedIncident?.id]);
 
   if (!selectedIncident) {
@@ -271,11 +269,6 @@ export default function IncidentDetailView({ isInline = false }) {
     progressItems,
     showFollowUpFeature ? buildFollowUpLogItems(followUps, followUpSecurityName, followUpClosure) : [],
   );
-  // Tombol tutup temuan hanya untuk petugas pelapor setelah PIC Security meminta verifikasi.
-  const canReporterCloseIncident = showFollowUpFeature
-    && !isFollowUpClosed
-    && followUpSimRole === REPORTER_ROLE_ID
-    && followUps.some((followUp) => followUp.status === FOLLOW_UP_STATUS.NEED_VERIFICATION);
 
   const saveIncidentInfo = () => {
     const didUpdate = handleUpdateIncidentInfo(selectedIncident.id, incidentInfoForm);
@@ -646,26 +639,6 @@ export default function IncidentDetailView({ isInline = false }) {
         <div className="p-4 bg-[#0b1229] border-t border-cyan-900/50 shrink-0 pb-safe">
           <button onClick={() => handleCloseIncident(selectedIncident.id)} className="w-full py-4 rounded-xl font-black uppercase tracking-widest text-xs border border-rose-500 text-rose-400 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(244,63,94,0.15)]"><CheckCircle2 className="w-5 h-5" /> Tutup SOS (Selesai)</button>
         </div>
-      )}
-
-      {canReporterCloseIncident && (
-        <div className="p-4 bg-[#0b1229] border-t border-cyan-900/50 shrink-0 pb-safe">
-          <button onClick={() => setShowCloseIncidentForm(true)} className="w-full py-4 rounded-xl font-black uppercase tracking-widest text-xs border border-rose-500 text-rose-400 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(244,63,94,0.15)]"><CheckCircle2 className="w-5 h-5" /> Tutup Temuan (Selesai)</button>
-        </div>
-      )}
-
-      {showCloseIncidentForm && (
-        <CloseIncidentModal
-          incident={selectedIncident}
-          followUps={followUps}
-          securityName={followUpSecurityName}
-          reporterName={followUpReporterName}
-          onClose={() => setShowCloseIncidentForm(false)}
-          onClosed={() => {
-            setShowCloseIncidentForm(false);
-            showFollowUpToast('Temuan ditutup. Tindak lanjut yang diverifikasi berstatus Done.');
-          }}
-        />
       )}
 
       <FollowUpToast toast={followUpToast} onDismiss={dismissFollowUpToast} />

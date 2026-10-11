@@ -90,25 +90,6 @@ export function useIncidentClosure(incidentId) {
   return useSyncExternalStore(subscribe, () => closuresByIncident.get(key) || null);
 }
 
-// Petugas pelapor menutup temuan: semua tindak lanjut yang menunggu verifikasi ikut terverifikasi (Done).
-export function closeIncidentWithVerification(incidentId, { comment, photoUrl, actorName }) {
-  const key = String(incidentId || '');
-  if (!key) return;
-  const at = new Date().toISOString();
-  const items = followUpsByIncident.get(key) || EMPTY_LIST;
-  followUpsByIncident.set(key, items.map((item) => (
-    item.status === FOLLOW_UP_STATUS.NEED_VERIFICATION
-      ? {
-        ...item,
-        status: FOLLOW_UP_STATUS.DONE,
-        entries: [...item.entries, createEntry('verify', { actorName, actorRole: 'Petugas Pelapor', comment, photoUrl, verdict: 'approved', at })],
-      }
-      : item
-  )));
-  closuresByIncident.set(key, { id: createId('fu-close'), at, actorName, comment, photoUrl });
-  emitChange();
-}
-
 export function assignFollowUp(incidentId, { assigneeId, instruction, photoUrl, document, actorName }) {
   const at = new Date().toISOString();
   const followUp = {

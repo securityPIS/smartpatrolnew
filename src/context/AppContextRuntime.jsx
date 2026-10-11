@@ -14,6 +14,16 @@ import { createPosterDataUrl, DEFAULT_LOCATION_OPTIONS } from '../data/defaultDa
 import { readFileAsDataUrl, readImageFileAsDataUrl } from '../utils/images';
 import { sanitizeEmail, sanitizeMultilineText, sanitizePhone, sanitizeText, sanitizeUrl, isReportFieldValid } from '../utils/sanitize';
 import { loadImageFromDB, saveImageToDB } from '../utils/imageStore';
+import {
+  CHECKPOINT_TYPE_MAIN,
+  CHECKPOINT_TYPE_SUB,
+  createCheckpointDefinitionId,
+  createCheckpointNameKey,
+  createUniqueCheckpointDefinitionId,
+  findNfcTagOwner,
+  normalizeShipCheckpointDefinitions,
+  sanitizeNfcTagId,
+} from '../utils/shipCheckpoints';
 import { saveImagePhotoSet } from '../utils/imageVariants';
 import { checkStorageQuota } from '../utils/storageQuota';
 import { recordAutoLogout } from '../utils/autoLogoutLog';
@@ -260,28 +270,15 @@ const SHIP_STATUS_OPTIONS = ['Non Operasional', 'Operasional', 'Situasional'];
 
 function createDefaultShipCheckpoints() {
   return defaultLocationOptions.map((name) => ({
+    id: createCheckpointDefinitionId(name),
     name,
     desc: '',
     isDefault: true,
+    type: CHECKPOINT_TYPE_MAIN,
+    parentId: '',
+    nfcTagId: '',
+    referencePhotoUrl: null,
   }));
-}
-
-function normalizeShipCheckpointDefinitions(checkpoints = []) {
-  const normalizedCheckpoints = Array.isArray(checkpoints) ? checkpoints : [];
-  const byName = new Map();
-
-  normalizedCheckpoints.forEach((checkpoint) => {
-    const safeName = sanitizeText(checkpoint?.name || '', 80);
-    const key = createCheckpointNameKey(safeName);
-    if (!key || byName.has(key)) return;
-    byName.set(key, {
-      name: safeName,
-      desc: sanitizeMultilineText(checkpoint?.desc || '', 140),
-      isDefault: Boolean(checkpoint?.isDefault),
-    });
-  });
-
-  return Array.from(byName.values());
 }
 
 function initializeShipCheckpointDefinitions(checkpoints = []) {
@@ -802,10 +799,6 @@ function getNextShiftMeta(meta) {
   const safeMeta = getCanonicalShiftMeta(meta) || meta || getShiftMeta();
   const { endAt } = getShiftScheduleTimes(safeMeta);
   return getShiftMeta(new Date(endAt.getTime() + 1000));
-}
-
-function createCheckpointNameKey(name) {
-  return sanitizeText(name || '', 120).trim().toLowerCase();
 }
 
 function createShipCheckpointId(ship, checkpointName, index) {
@@ -2408,7 +2401,10 @@ function collectLocalOnlyAssetUrls(stateSnapshot = {}) {
     });
   });
 
-  ensureArray(stateSnapshot.shipsData).forEach((ship) => pushUrl(ship?.photoUrl));
+  ensureArray(stateSnapshot.shipsData).forEach((ship) => {
+    pushUrl(ship?.photoUrl);
+    ensureArray(ship?.customCheckpoints).forEach((checkpoint) => pushUrl(checkpoint?.referencePhotoUrl));
+  });
   ensureArray(stateSnapshot.usersData).forEach((user) => pushUrl(user?.photoUrl));
   ensureArray(stateSnapshot.incidentsData).forEach((incident) => pushUrl(incident?.photoUrl));
 
@@ -2885,6 +2881,38 @@ function resolveLatestActiveSOSAlert(sosEntries = []) {
   return sosEntries.find((entry) => sanitizeText(entry?.status || '', 20).toLowerCase() !== 'resolved') || null;
 }
 
+// Foto acuan checkpoint yang belum terupload di-strip (null) saat dikirim ke cloud. Echo cloud
+// dengan versi foto yang sama (referencePhotoUpdatedAt sama) jangan sampai menghapus foto lokal;
+// bila dua sisi punya URL, utamakan URL https yang bisa dipakai lintas-device.
+function preserveCheckpointReferencePhotos(mergedShip, sourceShips = []) {
+  const candidatesById = new Map();
+  sourceShips.forEach((sourceShip) => {
+    ensureArray(sourceShip?.customCheckpoints).forEach((checkpoint) => {
+      if (!checkpoint?.id || !checkpoint.referencePhotoUrl) return;
+      const list = candidatesById.get(checkpoint.id) || [];
+      list.push(checkpoint);
+      candidatesById.set(checkpoint.id, list);
+    });
+  });
+  if (candidatesById.size === 0) return mergedShip;
+
+  let changed = false;
+  const customCheckpoints = ensureArray(mergedShip?.customCheckpoints).map((checkpoint) => {
+    const candidates = (candidatesById.get(checkpoint?.id) || []).filter(candidate => (
+      (candidate.referencePhotoUpdatedAt || null) === (checkpoint.referencePhotoUpdatedAt || null)
+    ));
+    const resolvedUrl = candidates.reduce(
+      (url, candidate) => resolveMergedAssetUrl(url, candidate.referencePhotoUrl),
+      checkpoint.referencePhotoUrl || null,
+    );
+    if (!resolvedUrl || resolvedUrl === checkpoint.referencePhotoUrl) return checkpoint;
+    changed = true;
+    return { ...checkpoint, referencePhotoUrl: resolvedUrl };
+  });
+
+  return changed ? { ...mergedShip, customCheckpoints } : mergedShip;
+}
+
 function mergeSharedStateSnapshots(baseState = {}, nextState = {}) {
   const deletedRecords = mergeDeletedRecords(baseState.deletedRecords || {}, nextState.deletedRecords || {});
   const resolvedActiveShiftKey = nextState.activeShiftKey || baseState.activeShiftKey || null;
@@ -2896,7 +2924,10 @@ function mergeSharedStateSnapshots(baseState = {}, nextState = {}) {
   const baseShips = normalizeShipsCollection(baseState.shipsData || []);
   const nextShips = normalizeShipsCollection(nextState.shipsData || []);
   const mergedShipsRaw = omitDeletedEntities(mergeEntitiesById(baseShips, nextShips, {
-    merge: (baseShip, nextShip) => mergeVersionedEntity(baseShip, nextShip),
+    merge: (baseShip, nextShip) => preserveCheckpointReferencePhotos(
+      mergeVersionedEntity(baseShip, nextShip),
+      [baseShip, nextShip],
+    ),
   }), deletedRecords.ships);
   const dedupedUserState = deduplicateUsersByOperationalIdentity(mergedUsersByIdRaw, {
     ships: mergedShipsRaw,
@@ -3633,6 +3664,10 @@ function prepareStateForUrgentCloudSync(stateSnapshot) {
     shipsData: (bounded.shipsData || []).map((s) => ({
       ...s,
       photoUrl: stripLocalAssetUrlSync(s?.photoUrl),
+      customCheckpoints: ensureArray(s?.customCheckpoints).map((checkpoint) => ({
+        ...checkpoint,
+        referencePhotoUrl: stripLocalAssetUrlSync(checkpoint?.referencePhotoUrl),
+      })),
     })),
     usersData: (bounded.usersData || []).map((u) => ({
       ...u,
@@ -4919,7 +4954,6 @@ export function AppProvider({ children }) {
   const [showShipForm, setShowShipForm] = useState(false);
   const [shipFormData, setShipFormData] = useState(() => createShipFormState());
   const [newCheckpoint, setNewCheckpoint] = useState('');
-  const [newShipCp, setNewShipCp] = useState({ name: '', desc: '' });
   const [showShipDocForm, setShowShipDocForm] = useState(false);
   const [newShipDoc, setNewShipDoc] = useState(() => createShipDocumentState());
   const [weatherInfo, setWeatherInfo] = useState(() => loadWeatherCache());
@@ -5948,6 +5982,17 @@ export function AppProvider({ children }) {
           ),
         }));
       }
+      ensureArray(ship?.customCheckpoints).forEach((checkpoint) => {
+        const referencePhotoUrl = checkpoint?.referencePhotoUrl;
+        if (!referencePhotoUrl || !isLocalOnlyAssetUrl(referencePhotoUrl)) return;
+        uploadTasks.push(async () => ({
+          photoUrl: await prepareCloudPhotoUrl(
+            referencePhotoUrl,
+            ['ships', ship.id, 'checkpoint-reference', checkpoint.id || checkpoint.name, referencePhotoUrl],
+            { skipUpload: false },
+          ),
+        }));
+      });
     });
 
     (boundedStateSnapshot.usersData || []).forEach((user) => {
@@ -6003,6 +6048,12 @@ export function AppProvider({ children }) {
     const preparedShipsData = (boundedStateSnapshot.shipsData || []).map((ship) => ({
       ...ship,
       photoUrl: cloudAssetCacheRef.current.get(ship?.photoUrl) || stripLocalAssetUrlSync(ship?.photoUrl) || null,
+      customCheckpoints: ensureArray(ship?.customCheckpoints).map((checkpoint) => ({
+        ...checkpoint,
+        referencePhotoUrl: cloudAssetCacheRef.current.get(checkpoint?.referencePhotoUrl)
+          || stripLocalAssetUrlSync(checkpoint?.referencePhotoUrl)
+          || null,
+      })),
     }));
 
     const preparedUsersData = (boundedStateSnapshot.usersData || []).map((user) => ({
@@ -8560,22 +8611,95 @@ export function AppProvider({ children }) {
     return applyPersonnelMonthlyPlanOnServer();
   }, [hasOperationalCloudAccess, isAdmin]);
 
-  const handleAddShipCp = useCallback(() => {
-    if (!isAdmin || !activeShip) return;
-    const safeName = sanitizeText(newShipCp.name, 80);
-    if (!safeName) return;
-    if (activeShip.customCheckpoints.some(checkpoint => createCheckpointNameKey(checkpoint.name) === createCheckpointNameKey(safeName))) {
-      setNewShipCp({ name: '', desc: '' });
-      return;
+  // Simpan (tambah/ubah) definisi titik checkpoint main/sub. NFC & foto kondisi awal wajib:
+  // keduanya jadi acuan saat patroli. Nama tidak bisa diubah (ID laporan patroli turunan nama).
+  const saveShipCheckpointDefinition = useCallback((draft = {}) => {
+    if (!isAdmin || !activeShip) return { ok: false, error: 'Hanya admin yang bisa mengubah titik.' };
+    const checkpoints = normalizeShipCheckpointDefinitions(activeShip.customCheckpoints);
+    const editingId = sanitizeText(draft.id || '', 120);
+    const existing = editingId ? checkpoints.find(checkpoint => checkpoint.id === editingId) : null;
+    if (editingId && !existing) return { ok: false, error: 'Titik tidak ditemukan. Muat ulang halaman.' };
+
+    const safeName = existing ? existing.name : sanitizeText(draft.name, 80);
+    if (!safeName) return { ok: false, error: 'Nama titik wajib diisi.' };
+    if (!existing && checkpoints.some(checkpoint => createCheckpointNameKey(checkpoint.name) === createCheckpointNameKey(safeName))) {
+      return { ok: false, error: `Titik "${safeName}" sudah ada di armada ini.` };
     }
-    updateActiveShip({
-      customCheckpoints: [
-        ...activeShip.customCheckpoints,
-        { name: safeName, desc: sanitizeMultilineText(newShipCp.desc, 140), isDefault: false },
-      ],
+
+    const type = existing ? existing.type : (draft.type === CHECKPOINT_TYPE_SUB ? CHECKPOINT_TYPE_SUB : CHECKPOINT_TYPE_MAIN);
+    const parentId = type === CHECKPOINT_TYPE_SUB ? (existing ? existing.parentId : sanitizeText(draft.parentId || '', 120)) : '';
+    if (type === CHECKPOINT_TYPE_SUB && !checkpoints.some(checkpoint => checkpoint.id === parentId && checkpoint.type === CHECKPOINT_TYPE_MAIN)) {
+      return { ok: false, error: 'Main checkpoint induk tidak ditemukan.' };
+    }
+
+    const nfcTagId = sanitizeNfcTagId(draft.nfcTagId);
+    if (!nfcTagId) return { ok: false, error: 'Tag NFC wajib didaftarkan.' };
+    const nfcOwner = findNfcTagOwner(shipsData, nfcTagId, { excludeShipId: activeShip.id, excludeCheckpointId: existing?.id });
+    if (nfcOwner) {
+      return { ok: false, error: `Tag NFC ini sudah dipakai titik "${nfcOwner.checkpointName}" (${nfcOwner.shipName}).` };
+    }
+    const referencePhotoUrl = sanitizeUrl(draft.referencePhotoUrl || '') || null;
+    if (!referencePhotoUrl) return { ok: false, error: 'Foto kondisi awal wajib diambil.' };
+
+    const photoChanged = referencePhotoUrl !== existing?.referencePhotoUrl;
+    const nextDefinition = {
+      ...(existing || {}),
+      id: existing?.id || createUniqueCheckpointDefinitionId(safeName, checkpoints.map(checkpoint => checkpoint.id)),
+      name: safeName,
+      desc: sanitizeMultilineText(draft.desc, 140),
+      isDefault: Boolean(existing?.isDefault),
+      type,
+      parentId,
+      nfcTagId,
+      referencePhotoUrl,
+      referencePhotoUpdatedAt: photoChanged ? getTrustedDate().toISOString() : (existing?.referencePhotoUpdatedAt || null),
+    };
+
+    let nextCheckpoints;
+    if (existing) {
+      nextCheckpoints = checkpoints.map(checkpoint => (checkpoint.id === existing.id ? nextDefinition : checkpoint));
+    } else if (type === CHECKPOINT_TYPE_SUB) {
+      // Sisipkan setelah sub terakhir induknya agar urutan patroli tetap main → sub.
+      let insertAt = checkpoints.findIndex(checkpoint => checkpoint.id === parentId) + 1;
+      while (insertAt < checkpoints.length && checkpoints[insertAt].parentId === parentId) insertAt += 1;
+      nextCheckpoints = [...checkpoints.slice(0, insertAt), nextDefinition, ...checkpoints.slice(insertAt)];
+    } else {
+      nextCheckpoints = [...checkpoints, nextDefinition];
+    }
+
+    updateActiveShip({ customCheckpoints: nextCheckpoints });
+    return { ok: true, checkpoint: nextDefinition };
+  }, [isAdmin, activeShip, shipsData, updateActiveShip]);
+
+  // Hapus titik; main ikut menghapus semua sub-nya. Titik default selalu dibuat ulang oleh
+  // normalisasi kapal, jadi tidak bisa dihapus.
+  const deleteShipCheckpointDefinition = useCallback((checkpointId) => {
+    if (!isAdmin || !activeShip) return;
+    const checkpoints = normalizeShipCheckpointDefinitions(activeShip.customCheckpoints);
+    const target = checkpoints.find(checkpoint => checkpoint.id === checkpointId);
+    if (!target || target.isDefault) return;
+    const subs = checkpoints.filter(checkpoint => checkpoint.parentId === target.id);
+    const removeCheckpoint = () => {
+      updateActiveShip({
+        customCheckpoints: checkpoints.filter(checkpoint => checkpoint.id !== target.id && checkpoint.parentId !== target.id),
+      });
+    };
+    setConfirmDialog({
+      title: 'Hapus Titik Checkpoint',
+      message: subs.length > 0
+        ? `Hapus main checkpoint "${target.name}" beserta ${subs.length} sub checkpoint di dalamnya?`
+        : `Hapus titik "${target.name}"?`,
+      confirmText: 'HAPUS',
+      onConfirm: removeCheckpoint,
     });
-    setNewShipCp({ name: '', desc: '' });
-  }, [isAdmin, activeShip, newShipCp, updateActiveShip]);
+  }, [isAdmin, activeShip, updateActiveShip]);
+
+  const pickShipCheckpointReferencePhoto = useCallback(async () => {
+    if (!isAdmin) return null;
+    const dataUrl = await pickLocalImage();
+    if (!dataUrl) return null;
+    return saveImageToDB(dataUrl);
+  }, [isAdmin]);
   const handleShipPhotoUpdate = useCallback(async () => { if (!isAdmin || !activeShipId) return; const dataUrl = await pickLocalImage(); if (!dataUrl) return; const url = await saveImageToDB(dataUrl); if (url) updateActiveShip({ photoUrl: url }); }, [isAdmin, activeShipId, updateActiveShip]);
   const handleChangeSchedule = useCallback((userId, field, value) => { if (!isAdmin || !activeShip) return; const currentSchedules = activeShip.personnelSchedules || {}; const newSchedules = { ...currentSchedules, [userId]: { ...(currentSchedules[userId] || {}), [field]: value } }; updateActiveShip({ personnelSchedules: newSchedules }); }, [isAdmin, activeShip, updateActiveShip]);
   const handleShipFormPhotoUpload = useCallback(async () => {
@@ -10926,14 +11050,14 @@ export function AppProvider({ children }) {
     setEditShipInfoData,
     updateActiveShip,
     handleTogglePersonnel,
-    handleAddShipCp,
+    saveShipCheckpointDefinition,
+    deleteShipCheckpointDefinition,
+    pickShipCheckpointReferencePhoto,
     handleShipPhotoUpdate,
     handleChangeSchedule,
     handleAddShipDoc,
     handleShipDocUpload,
     handleDownloadShipDoc,
-    newShipCp,
-    setNewShipCp,
     newShipDoc,
     setNewShipDoc,
     showShipDocForm,
@@ -10957,7 +11081,9 @@ export function AppProvider({ children }) {
     closeShipDocForm,
     editShipInfoData,
     handleAddCheckpointToForm,
-    handleAddShipCp,
+    saveShipCheckpointDefinition,
+    deleteShipCheckpointDefinition,
+    pickShipCheckpointReferencePhoto,
     handleAddShipDoc,
     handleChangeSchedule,
     handleConfirmAssign,
@@ -10974,7 +11100,6 @@ export function AppProvider({ children }) {
     handleTogglePersonnel,
     isEditingShipInfo,
     newCheckpoint,
-    newShipCp,
     newShipDoc,
     operationalShip,
     operationalShipName,

@@ -46,6 +46,7 @@ function DocumentTypeIcon({ document }) {
 
 import ShipFormView from '../components/views/ShipFormView';
 import ShipDocumentFormView from '../components/views/ShipDocumentFormView';
+import ShipCheckpointsTab from '../components/views/ShipCheckpointsTab';
 
 function usesSplitVoyageRoute(status) {
   return status === 'Operasional' || status === 'Situasional';
@@ -56,8 +57,8 @@ const ShipsPage = React.memo(function ShipsPage() {
     shipsData, activeShipId, setActiveShipId, activeShip,
     setShowShipForm, showShipForm, shipDetailTab, setShipDetailTab, scheduleMonth, setScheduleMonth,
     isEditingShipInfo, setIsEditingShipInfo, editShipInfoData, setEditShipInfoData,
-    updateActiveShip, handleTogglePersonnel, handleAddShipCp, handleShipPhotoUpdate,
-    handleChangeSchedule, handleDownloadShipDoc, openShipDocForm, closeShipDocForm, showShipDocForm, newShipCp, setNewShipCp,
+    updateActiveShip, handleTogglePersonnel, handleShipPhotoUpdate,
+    handleChangeSchedule, handleDownloadShipDoc, openShipDocForm, closeShipDocForm, showShipDocForm,
     handleDeleteShip,
   } = useShips();
   const { usersData } = useUsers();
@@ -303,34 +304,7 @@ const ShipsPage = React.memo(function ShipsPage() {
           </div>
         )}
 
-        {shipDetailTab === 'checkpoints' && (
-          <div className="space-y-4 animate-in fade-in">
-             <div className="bg-[#0b1229] p-4 rounded-xl border border-cyan-800/50 space-y-3 text-left">
-                {activeShip.customCheckpoints.length === 0 ? (
-                   <p className="text-xs text-slate-500 text-center italic">Belum ada titik periksa.</p>
-                ) : (
-                   activeShip.customCheckpoints.map((cp, idx) => (
-                     <div key={idx} className="p-3 bg-[#070b19] border border-cyan-800/50 rounded-xl flex justify-between items-start">
-                       <div>
-                          <p className="font-bold text-cyan-100 flex items-center gap-2 text-left">
-                            <span className="text-[9px] text-cyan-600 border border-cyan-800 px-1 rounded shrink-0">TITIK-{idx+1}</span>
-                            {cp.name}
-                            {cp.isDefault && <span className="text-[9px] uppercase tracking-widest text-emerald-300 border border-emerald-500/40 px-1 rounded shrink-0">Default</span>}
-                          </p>
-                          <p className="text-xs text-cyan-500 mt-1">{cp.desc || 'Tanpa deskripsi'}</p>
-                       </div>
-                       <button onClick={() => updateActiveShip({customCheckpoints: activeShip.customCheckpoints.filter((_,i)=>i!==idx)})} className="p-1 rounded text-rose-500 hover:bg-rose-500/20" aria-label="Hapus titik periksa"><Trash2 className="w-4 h-4"/></button>
-                     </div>
-                   ))
-                )}
-                <div className="pt-3 border-t border-cyan-900/50 space-y-2">
-                   <input type="text" placeholder="Nama Titik..." value={newShipCp.name} onChange={e=>setNewShipCp({...newShipCp, name: e.target.value})} className="w-full bg-[#070b19] border border-cyan-800/50 rounded-lg p-2 text-sm focus:border-cyan-400 outline-none text-white"/>
-                   <input type="text" placeholder="Deskripsi instruksi..." value={newShipCp.desc} onChange={e=>setNewShipCp({...newShipCp, desc: e.target.value})} className="w-full bg-[#070b19] border border-cyan-800/50 rounded-lg p-2 text-sm focus:border-cyan-400 outline-none text-white"/>
-                   <button onClick={handleAddShipCp} className="w-full py-2 bg-cyan-900/50 hover:bg-cyan-600 text-cyan-300 hover:text-white rounded-lg text-xs font-bold uppercase tracking-widest transition-colors">Tambah Titik</button>
-                </div>
-             </div>
-          </div>
-        )}
+        {shipDetailTab === 'checkpoints' && <ShipCheckpointsTab ship={activeShip} />}
 
         {shipDetailTab === 'sos' && (
           <div className="space-y-4 animate-in fade-in">

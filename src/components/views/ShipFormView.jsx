@@ -82,7 +82,7 @@ export default function ShipFormView({ isInline = false }) {
         <div className="pt-2 border-t border-cyan-900/30">
           <h4 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-3 pb-2">Daftar TITIK Periksa</h4>
           <p className="text-[11px] text-cyan-500 mb-3">
-            {DEFAULT_LOCATION_OPTIONS.length} titik default armada dibuat otomatis saat armada baru dibuat, lalu admin tetap bisa menambah atau menghapus titik sesuai kebutuhan armada.
+            {DEFAULT_LOCATION_OPTIONS.length} titik default armada dibuat otomatis saat armada baru dibuat, lalu admin tetap bisa menambah atau menghapus titik sesuai kebutuhan armada. Setelah armada disimpan, lengkapi tag NFC, foto kondisi awal, dan sub checkpoint tiap titik di tab TITIK.
           </p>
           <div className="flex gap-2 mb-3">
             <input type="text" value={newCheckpoint} onChange={e => setNewCheckpoint(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAddCheckpointToForm()} placeholder="Nama Titik Baru..." className="flex-1 bg-[#0b1229] border border-cyan-800/50 rounded-xl p-3 text-sm text-cyan-50 focus:border-cyan-400 outline-none shadow-sm" />

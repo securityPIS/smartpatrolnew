@@ -334,10 +334,10 @@ function ReviewFollowUpModal({ incident, followUp, sequence, securityName, onClo
           <label className={LABEL_CLASS}>
             {approved ? 'Catatan' : 'Komentar'} {approved ? <span className="text-cyan-700 normal-case">(opsional)</span> : <span className="text-rose-400">*</span>}
           </label>
-          <textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={3} placeholder={approved ? 'Contoh: pekerjaan sudah sesuai instruksi.' : 'Jelaskan apa yang belum sesuai...'} className={TEXTAREA_CLASS} />
+          <textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={3} placeholder={approved ? 'Contoh: rencana disetujui, kabari setelah pekerjaan selesai.' : 'Jelaskan apa yang belum sesuai...'} className={TEXTAREA_CLASS} />
           {approved && (
             <div className="text-[10px] mt-2 ml-1 space-y-1">
-              <p className="text-emerald-300"><span className="font-bold">Submit</span>: tindak lanjut langsung selesai (Done) tanpa verifikasi.</p>
+              <p className="text-emerald-300"><span className="font-bold">Submit</span>: konfirmasi rencana tindakan PIC fungsi. Status kembali Need Action sampai pekerjaan selesai dan diupdate lagi.</p>
               <p className="text-fuchsia-300"><span className="font-bold">Need Verification</span>: permintaan verifikasi dikirim ke petugas pelapor ({incident.reportedBy || '-'}).</p>
             </div>
           )}
@@ -437,7 +437,12 @@ export function FollowUpAssignCard({ incident, followUps, simRole, securityName,
 
 function getWaitingHint(followUp, assignee, reporterName, isClosed) {
   if (isClosed && followUp.status !== FOLLOW_UP_STATUS.DONE) return 'Temuan sudah ditutup.';
-  if (followUp.status === FOLLOW_UP_STATUS.NEED_ACTION) return `Menunggu update dari ${assignee.label}.`;
+  if (followUp.status === FOLLOW_UP_STATUS.NEED_ACTION) {
+    const lastReview = [...followUp.entries].reverse().find((entry) => entry.kind === 'review');
+    return lastReview?.planConfirmed
+      ? `Rencana sudah dikonfirmasi PIC Security. Menunggu update penyelesaian dari ${assignee.label}.`
+      : `Menunggu update dari ${assignee.label}.`;
+  }
   if (followUp.status === FOLLOW_UP_STATUS.NEED_REVIEW) return 'Menunggu feedback PIC Security.';
   if (followUp.status === FOLLOW_UP_STATUS.NEED_VERIFICATION) return `Menunggu verifikasi petugas pelapor (${reporterName}).`;
   return 'Tindak lanjut selesai dan sudah terverifikasi.';
@@ -525,7 +530,7 @@ function FollowUpSection({ incident, followUp, sequence, simRole, securityName, 
                     <div key={entry.id}>
                       <p className="text-[10px] font-mono text-cyan-600">{stamp.date} {stamp.time} · <span className="text-cyan-300 font-bold">{entry.actorName}</span></p>
                       <p className={`text-[10px] font-bold uppercase tracking-wider ${verdictClass}`}>
-                        {ENTRY_TITLES[entry.kind]}{entry.verdict === 'approved' ? ' · Sesuai' : entry.verdict === 'rejected' ? ' · Belum sesuai' : ''}{entry.skipVerification ? ' · Selesai tanpa verifikasi' : ''}
+                        {ENTRY_TITLES[entry.kind]}{entry.verdict === 'approved' ? ' · Sesuai' : entry.verdict === 'rejected' ? ' · Belum sesuai' : ''}{entry.planConfirmed ? ' · Rencana dikonfirmasi' : ''}
                       </p>
                       {entry.comment && <p className="text-xs text-cyan-100 whitespace-pre-wrap mt-0.5">{entry.comment}</p>}
                       {entry.photoUrl && (
@@ -642,7 +647,7 @@ export function FollowUpSectionList({ incident, followUps, simRole, securityName
             closeAction();
             if (!approved) onToast('Feedback terkirim. Status kembali ke Need Action.');
             else if (requestVerification) onToast(`Permintaan verifikasi dikirim ke petugas pelapor (${reporterName}). Status: Need Verification.`);
-            else onToast('Tindak lanjut dikonfirmasi sesuai. Status: Done (tanpa verifikasi).');
+            else onToast('Rencana tindakan dikonfirmasi. Status: Need Action — menunggu penyelesaian dari PIC fungsi.');
           }}
         />
       )}

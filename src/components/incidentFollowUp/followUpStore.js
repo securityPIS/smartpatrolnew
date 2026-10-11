@@ -47,6 +47,7 @@ export function getAssigneeMeta(assigneeId, securityName = 'PIC Security') {
 }
 
 const followUpsByIncident = new Map();
+const closuresByIncident = new Map();
 const listeners = new Set();
 const EMPTY_LIST = Object.freeze([]);
 
@@ -82,6 +83,30 @@ function createEntry(kind, { actorName, actorRole, comment = '', photoUrl = null
 export function useIncidentFollowUps(incidentId) {
   const key = String(incidentId || '');
   return useSyncExternalStore(subscribe, () => followUpsByIncident.get(key) || EMPTY_LIST);
+}
+
+export function useIncidentClosure(incidentId) {
+  const key = String(incidentId || '');
+  return useSyncExternalStore(subscribe, () => closuresByIncident.get(key) || null);
+}
+
+// Petugas pelapor menutup temuan: semua tindak lanjut yang menunggu verifikasi ikut terverifikasi (Done).
+export function closeIncidentWithVerification(incidentId, { comment, photoUrl, actorName }) {
+  const key = String(incidentId || '');
+  if (!key) return;
+  const at = new Date().toISOString();
+  const items = followUpsByIncident.get(key) || EMPTY_LIST;
+  followUpsByIncident.set(key, items.map((item) => (
+    item.status === FOLLOW_UP_STATUS.NEED_VERIFICATION
+      ? {
+        ...item,
+        status: FOLLOW_UP_STATUS.DONE,
+        entries: [...item.entries, createEntry('verify', { actorName, actorRole: 'Petugas Pelapor', comment, photoUrl, verdict: 'approved', at })],
+      }
+      : item
+  )));
+  closuresByIncident.set(key, { id: createId('fu-close'), at, actorName, comment, photoUrl });
+  emitChange();
 }
 
 export function assignFollowUp(incidentId, { assigneeId, instruction, photoUrl, document, actorName }) {
@@ -174,8 +199,20 @@ const ENTRY_LOG_LABEL = {
 };
 
 // Bentuk log yang siap digabung dengan riwayat update temuan.
-export function buildFollowUpLogItems(followUps, securityName) {
+export function buildFollowUpLogItems(followUps, securityName, closure = null) {
   const logs = [];
+  if (closure) {
+    logs.push({
+      id: closure.id,
+      isFollowUpLog: true,
+      createdAt: closure.at,
+      author: closure.actorName,
+      tag: 'Temuan Ditutup',
+      headline: 'Petugas Pelapor menutup temuan setelah verifikasi',
+      comment: closure.comment,
+      photoUrl: closure.photoUrl,
+    });
+  }
   followUps.forEach((followUp, index) => {
     const assignee = getAssigneeMeta(followUp.assigneeId, securityName);
     followUp.entries.forEach((entry) => {

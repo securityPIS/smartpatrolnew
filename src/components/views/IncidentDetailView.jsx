@@ -11,8 +11,8 @@ import { useIncidents, useReports, useRole, useShips } from '../../context/AppCo
 import { ChevronDown, AlertTriangle, CheckCircle2, Camera, X, Plus, FileText, Trash2, Images, Pencil, Save, MapPin, ExternalLink } from 'lucide-react';
 import AsyncImage from '../AsyncImage';
 import { TimeAuditPills, TimeAuditRecordCard } from '../TimeAuditStatus';
-import { SECURITY_ASSIGNEE_ID, buildFollowUpLogItems, formatFollowUpTimestamp, useIncidentFollowUps } from '../incidentFollowUp/followUpStore';
-import { FollowUpAssignCard, FollowUpRoleSwitcher, FollowUpSectionList, FollowUpToast } from '../incidentFollowUp/FollowUpPanels';
+import { FOLLOW_UP_STATUS, REPORTER_ROLE_ID, SECURITY_ASSIGNEE_ID, buildFollowUpLogItems, formatFollowUpTimestamp, useIncidentClosure, useIncidentFollowUps } from '../incidentFollowUp/followUpStore';
+import { CloseIncidentModal, FollowUpAssignCard, FollowUpRoleSwitcher, FollowUpSectionList, FollowUpToast } from '../incidentFollowUp/FollowUpPanels';
 
 function normalizeIncidentMetaKeyPart(value) {
   return String(value || '')
@@ -195,15 +195,20 @@ export default function IncidentDetailView({ isInline = false }) {
   const [showUpdateForm, setShowUpdateForm] = useState(false);
   const [activeInfoEditor, setActiveInfoEditor] = useState(null);
   const [incidentInfoForm, setIncidentInfoForm] = useState(() => createIncidentInfoState(null));
+  const [isHeaderExpanded, setIsHeaderExpanded] = useState(false);
+  const [showCloseIncidentForm, setShowCloseIncidentForm] = useState(false);
   const [followUpSimRole, setFollowUpSimRole] = useState(SECURITY_ASSIGNEE_ID);
   const [followUpToast, setFollowUpToast] = useState(null);
   const followUps = useIncidentFollowUps(selectedIncident?.id);
+  const followUpClosure = useIncidentClosure(selectedIncident?.id);
   const dismissFollowUpToast = useCallback(() => setFollowUpToast(null), []);
   const showFollowUpToast = useCallback((message) => setFollowUpToast({ id: Date.now(), message }), []);
 
   useEffect(() => {
     setIncidentInfoForm(createIncidentInfoState(selectedIncident));
     setActiveInfoEditor(null);
+    setIsHeaderExpanded(false);
+    setShowCloseIncidentForm(false);
   }, [selectedIncident?.id]);
 
   if (!selectedIncident) {
@@ -225,7 +230,10 @@ export default function IncidentDetailView({ isInline = false }) {
     () => resolveIncidentMetaRecord(incidentMeta, selectedIncident),
     [incidentMeta, selectedIncident],
   );
-  const incidentStatus = getIncidentStatus(selectedIncident, incidentMetaRecord);
+  const showFollowUpFeature = !isSOSIncident;
+  // Penutupan temuan versi dummy (oleh petugas pelapor) ikut menandai status CLOSED di tampilan.
+  const isFollowUpClosed = showFollowUpFeature && Boolean(followUpClosure);
+  const incidentStatus = isFollowUpClosed ? 'closed' : getIncidentStatus(selectedIncident, incidentMetaRecord);
   const documentationItems = incidentMetaRecord?.documentation || [];
   const progressItems = incidentMetaRecord?.progress || [];
   const canManageDetailActions = incidentStatus !== 'closed' && canManageIncident(selectedIncident);
@@ -250,13 +258,17 @@ export default function IncidentDetailView({ isInline = false }) {
   );
   const incidentMapsQuery = incidentMapConfig ? `${incidentMapConfig.lat},${incidentMapConfig.lng}` : '';
   const incidentMapsHref = incidentMapConfig ? `https://www.google.com/maps?q=${incidentMapsQuery}` : '#';
-  const showFollowUpFeature = !isSOSIncident;
   const followUpSecurityName = (isPic && currentUserRecord?.name) || 'PIC Security';
   const followUpReporterName = selectedIncident.reportedBy || 'Petugas Pelapor';
   const historyItems = mergeIncidentHistoryItems(
     progressItems,
-    showFollowUpFeature ? buildFollowUpLogItems(followUps, followUpSecurityName) : [],
+    showFollowUpFeature ? buildFollowUpLogItems(followUps, followUpSecurityName, followUpClosure) : [],
   );
+  // Tombol tutup temuan hanya untuk petugas pelapor setelah PIC Security meminta verifikasi.
+  const canReporterCloseIncident = showFollowUpFeature
+    && !isFollowUpClosed
+    && followUpSimRole === REPORTER_ROLE_ID
+    && followUps.some((followUp) => followUp.status === FOLLOW_UP_STATUS.NEED_VERIFICATION);
 
   const saveIncidentInfo = () => {
     const didUpdate = handleUpdateIncidentInfo(selectedIncident.id, incidentInfoForm);
@@ -315,48 +327,31 @@ export default function IncidentDetailView({ isInline = false }) {
 
   return (
     <div className={`flex flex-col h-full bg-[#070b19] ${isInline ? 'border-l border-cyan-900/50' : 'fixed inset-0 z-[100] sm:max-w-md sm:mx-auto sm:border-x sm:border-cyan-900/50'}`}>
-      {selectedIncident.photoUrl ? (
-        <div className="w-full h-64 bg-[#0b1229] relative shrink-0 cursor-pointer group" onClick={() => setPreviewPhoto({ url: selectedIncident.photoUrl, author: selectedIncident.reportedBy, time: `${selectedIncident.date} ${selectedIncident.time}` })}>
-          <AsyncImage src={selectedIncident.heroUrl} fallbackSrc={selectedIncident.photoUrl} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" alt="Bukti" />
-          <div className="absolute inset-0 bg-gradient-to-b from-[#070b19]/80 via-transparent to-[#070b19]"></div>
-          <div className="absolute inset-0 bg-gradient-to-tr from-white/80 via-transparent to-transparent light-vignette-bl opacity-0 pointer-events-none"></div>
+      <div className={`border-b bg-[#0b1229] shrink-0 shadow-sm ${isSOSIncident ? 'border-rose-500/30' : 'border-yellow-500/30'}`}>
+        <div className="p-3 flex items-center gap-3">
           {!isInline && (
-            <button onClick={(event) => { event.stopPropagation(); setSelectedIncident(null); }} className="absolute top-4 left-4 p-2 bg-black/50 text-white rounded-full backdrop-blur-md border border-white/20 hover:bg-black/70 transition-colors z-10" aria-label="Tutup detail"><ChevronDown className="w-6 h-6 rotate-90" /></button>
+            <button onClick={() => setSelectedIncident(null)} className="p-2 bg-[#070b19] border border-cyan-800 text-cyan-300 rounded-full hover:bg-cyan-900/50 transition-colors shrink-0" aria-label="Tutup detail"><ChevronDown className="w-5 h-5 rotate-90" /></button>
           )}
-          {isAdmin && (
-            <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
-              {canReplacePhoto && (
-                <button onClick={(event) => { event.stopPropagation(); handleUpdateIncidentPhoto(selectedIncident.id); }} className="p-2 bg-emerald-500/80 text-white rounded-full backdrop-blur-md border border-emerald-400/50 hover:bg-emerald-500 transition-all shadow-lg" title="Ganti Foto Bukti" aria-label="Ganti Foto Bukti">
-                  <Camera className="w-5 h-5" />
-                </button>
-              )}
-              {canDeleteIncident && (
-                <button onClick={(event) => { event.stopPropagation(); handleDeleteIncident(selectedIncident.id); }} className="p-2 bg-rose-500/80 text-white rounded-full backdrop-blur-md border border-rose-400/50 hover:bg-rose-500 transition-all shadow-lg" title="Hapus Temuan" aria-label="Hapus Temuan">
-                  <Trash2 className="w-5 h-5" />
-                </button>
-              )}
+          <button
+            type="button"
+            onClick={() => setIsHeaderExpanded((value) => !value)}
+            className="flex-1 min-w-0 flex items-center gap-3 text-left"
+            aria-expanded={isHeaderExpanded}
+            aria-label={isHeaderExpanded ? 'Ciutkan header' : 'Bentangkan header'}
+          >
+            {selectedIncident.photoUrl && !isHeaderExpanded && (
+              <div className="w-10 h-10 rounded-lg overflow-hidden border border-cyan-800 shrink-0">
+                <AsyncImage src={selectedIncident.thumbUrl} fallbackSrc={selectedIncident.photoUrl} className="w-full h-full object-cover" alt="Bukti" />
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <span className={`text-[10px] uppercase tracking-widest font-bold ${isSOSIncident ? 'text-rose-400' : 'text-cyan-500'}`}>{isSOSIncident ? 'Informasi SOS' : 'Detail Temuan'}</span>
+              <h3 className={`font-bold text-lg leading-tight line-clamp-1 ${titleClass}`}>{selectedIncident.location}</h3>
             </div>
-          )}
-          <div className="absolute bottom-4 right-4 bg-black/70 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs text-white/90 text-right border border-cyan-900/50 z-10 shadow-lg">
-            <p className={`font-bold ${isSOSIncident ? 'text-rose-300' : 'text-yellow-400'}`}>{selectedIncident.reportedBy}</p>
-            <p className="text-[10px] text-cyan-100/70">{selectedIncident.date} {selectedIncident.time}</p>
-          </div>
-          <div className="absolute bottom-4 left-4 right-36 z-10">
-            <span className={`text-[10px] px-2 py-1 border rounded font-bold mb-2 inline-block shadow-sm ${typeBadgeClass}`}>{isSOSIncident ? 'SOS DARURAT' : 'TEMUAN'}</span>
-            <h2 className="text-2xl font-black text-white drop-shadow-md leading-tight line-clamp-2">{selectedIncident.location}</h2>
-          </div>
-        </div>
-      ) : (
-        <div className={`p-4 border-b flex items-center gap-3 bg-[#0b1229] shrink-0 shadow-sm ${isSOSIncident ? 'border-rose-500/30' : 'border-yellow-500/30'}`}>
-          {!isInline && (
-            <button onClick={() => setSelectedIncident(null)} className="p-2 bg-[#070b19] border border-cyan-800 text-cyan-300 rounded-full hover:bg-cyan-900/50 transition-colors" aria-label="Tutup detail"><ChevronDown className="w-5 h-5 rotate-90" /></button>
-          )}
-          <div className="flex-1">
-            <span className={`text-[10px] uppercase tracking-widest font-bold ${isSOSIncident ? 'text-rose-400' : 'text-cyan-500'}`}>{isSOSIncident ? 'Informasi SOS' : 'Detail Temuan'}</span>
-            <h3 className={`font-bold text-xl line-clamp-1 ${titleClass}`}>{selectedIncident.location}</h3>
-          </div>
+            <ChevronDown className={`w-5 h-5 text-cyan-500 shrink-0 transition-transform ${isHeaderExpanded ? 'rotate-180' : ''}`} />
+          </button>
           {isAdmin && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               {canReplacePhoto && (
                 <button onClick={() => handleUpdateIncidentPhoto(selectedIncident.id)} className="p-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-lg hover:bg-emerald-500/20 transition-all" title="Ganti Foto Bukti" aria-label="Ganti Foto Bukti">
                   <Camera className="w-4 h-4" />
@@ -370,7 +365,31 @@ export default function IncidentDetailView({ isInline = false }) {
             </div>
           )}
         </div>
-      )}
+
+        {isHeaderExpanded && (
+          selectedIncident.photoUrl ? (
+            <div className="w-full h-56 relative cursor-pointer group animate-in fade-in" onClick={() => setPreviewPhoto({ url: selectedIncident.photoUrl, author: selectedIncident.reportedBy, time: `${selectedIncident.date} ${selectedIncident.time}` })}>
+              <AsyncImage src={selectedIncident.heroUrl} fallbackSrc={selectedIncident.photoUrl} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" alt="Bukti" />
+              <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[#070b19]"></div>
+              <div className="absolute bottom-3 left-3 z-10">
+                <span className={`text-[10px] px-2 py-1 border rounded font-bold inline-block shadow-sm ${typeBadgeClass}`}>{isSOSIncident ? 'SOS DARURAT' : 'TEMUAN'}</span>
+              </div>
+              <div className="absolute bottom-3 right-3 bg-black/70 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs text-white/90 text-right border border-cyan-900/50 z-10 shadow-lg">
+                <p className={`font-bold ${isSOSIncident ? 'text-rose-300' : 'text-yellow-400'}`}>{selectedIncident.reportedBy}</p>
+                <p className="text-[10px] text-cyan-100/70">{selectedIncident.date} {selectedIncident.time}</p>
+              </div>
+            </div>
+          ) : (
+            <div className="px-4 pb-3 flex items-center justify-between gap-3 animate-in fade-in">
+              <span className={`text-[10px] px-2 py-1 border rounded font-bold ${typeBadgeClass}`}>{isSOSIncident ? 'SOS DARURAT' : 'TEMUAN'}</span>
+              <div className="text-right text-xs">
+                <p className={`font-bold ${isSOSIncident ? 'text-rose-300' : 'text-yellow-400'}`}>{selectedIncident.reportedBy || '-'}</p>
+                <p className="text-[10px] text-cyan-500">{selectedIncident.date} {selectedIncident.time}</p>
+              </div>
+            </div>
+          )
+        )}
+      </div>
 
       <div className="flex bg-[#0b1229] border-b border-cyan-900/50 shrink-0">
         <button onClick={() => setActiveTab('update')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-all border-b-2 ${activeTab === 'update' ? 'text-emerald-400 border-emerald-500 bg-emerald-500/5' : 'text-cyan-600 border-transparent hover:text-cyan-400'}`}>Update</button>
@@ -514,6 +533,7 @@ export default function IncidentDetailView({ isInline = false }) {
                 followUps={followUps}
                 simRole={followUpSimRole}
                 securityName={followUpSecurityName}
+                isClosed={isFollowUpClosed}
                 onToast={showFollowUpToast}
                 onOpenUpdateTab={() => setActiveTab('update')}
               />
@@ -577,6 +597,7 @@ export default function IncidentDetailView({ isInline = false }) {
                 simRole={followUpSimRole}
                 securityName={followUpSecurityName}
                 reporterName={followUpReporterName}
+                isClosed={isFollowUpClosed}
                 onToast={showFollowUpToast}
                 onPreviewPhoto={setPreviewPhoto}
               />
@@ -621,10 +642,30 @@ export default function IncidentDetailView({ isInline = false }) {
         )}
       </div>
 
-      {incidentStatus !== 'closed' && canCloseIncident(selectedIncident) && (
+      {isSOSIncident && incidentStatus !== 'closed' && canCloseIncident(selectedIncident) && (
         <div className="p-4 bg-[#0b1229] border-t border-cyan-900/50 shrink-0 pb-safe">
-          <button onClick={() => handleCloseIncident(selectedIncident.id)} className="w-full py-4 rounded-xl font-black uppercase tracking-widest text-xs border border-rose-500 text-rose-400 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(244,63,94,0.15)]"><CheckCircle2 className="w-5 h-5" /> {isSOSIncident ? 'Tutup SOS (Selesai)' : 'Tutup Temuan (Selesai)'}</button>
+          <button onClick={() => handleCloseIncident(selectedIncident.id)} className="w-full py-4 rounded-xl font-black uppercase tracking-widest text-xs border border-rose-500 text-rose-400 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(244,63,94,0.15)]"><CheckCircle2 className="w-5 h-5" /> Tutup SOS (Selesai)</button>
         </div>
+      )}
+
+      {canReporterCloseIncident && (
+        <div className="p-4 bg-[#0b1229] border-t border-cyan-900/50 shrink-0 pb-safe">
+          <button onClick={() => setShowCloseIncidentForm(true)} className="w-full py-4 rounded-xl font-black uppercase tracking-widest text-xs border border-rose-500 text-rose-400 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(244,63,94,0.15)]"><CheckCircle2 className="w-5 h-5" /> Tutup Temuan (Selesai)</button>
+        </div>
+      )}
+
+      {showCloseIncidentForm && (
+        <CloseIncidentModal
+          incident={selectedIncident}
+          followUps={followUps}
+          securityName={followUpSecurityName}
+          reporterName={followUpReporterName}
+          onClose={() => setShowCloseIncidentForm(false)}
+          onClosed={() => {
+            setShowCloseIncidentForm(false);
+            showFollowUpToast('Temuan ditutup. Tindak lanjut yang diverifikasi berstatus Done.');
+          }}
+        />
       )}
 
       <FollowUpToast toast={followUpToast} onDismiss={dismissFollowUpToast} />

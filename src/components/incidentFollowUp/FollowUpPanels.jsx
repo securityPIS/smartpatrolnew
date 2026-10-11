@@ -8,7 +8,7 @@ Side Effects: Mengubah store dummy di memori dan membuka PDF; tidak menyentuh da
 */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Camera, CheckCircle2, ChevronDown, ClipboardList, Eye, FileText, Send, ShieldCheck, UserCheck, X, XCircle } from 'lucide-react';
+import { AlertTriangle, Camera, CheckCircle2, ChevronDown, ClipboardList, Eye, FileText, Send, ShieldCheck, UserCheck, X, XCircle } from 'lucide-react';
 import AsyncImage from '../AsyncImage';
 import {
   FOLLOW_UP_STATUS,
@@ -17,6 +17,7 @@ import {
   REPORTER_ROLE_ID,
   SECURITY_ASSIGNEE_ID,
   assignFollowUp,
+  closeIncidentWithVerification,
   formatFollowUpTimestamp,
   getAssigneeMeta,
   seedDemoFollowUps,
@@ -387,9 +388,9 @@ function VerifyFollowUpModal({ incident, followUp, sequence, reporterName, onClo
   );
 }
 
-export function FollowUpAssignCard({ incident, followUps, simRole, securityName, onToast, onOpenUpdateTab }) {
+export function FollowUpAssignCard({ incident, followUps, simRole, securityName, isClosed, onToast, onOpenUpdateTab }) {
   const [showAssignForm, setShowAssignForm] = useState(false);
-  const canAssign = simRole === SECURITY_ASSIGNEE_ID;
+  const canAssign = !isClosed && simRole === SECURITY_ASSIGNEE_ID;
   const doneCount = followUps.filter((item) => item.status === FOLLOW_UP_STATUS.DONE).length;
 
   return (
@@ -422,7 +423,7 @@ export function FollowUpAssignCard({ incident, followUps, simRole, securityName,
           <Send className="w-4 h-4" /> Assign Tindak Lanjut
         </button>
       ) : (
-        <p className="text-[11px] text-amber-300/80">Hanya PIC Security yang dapat menugaskan tindak lanjut.</p>
+        <p className="text-[11px] text-amber-300/80">{isClosed ? 'Temuan sudah ditutup.' : 'Hanya PIC Security yang dapat menugaskan tindak lanjut.'}</p>
       )}
 
       {showAssignForm && (
@@ -443,7 +444,8 @@ export function FollowUpAssignCard({ incident, followUps, simRole, securityName,
   );
 }
 
-function getWaitingHint(followUp, assignee, reporterName) {
+function getWaitingHint(followUp, assignee, reporterName, isClosed) {
+  if (isClosed && followUp.status !== FOLLOW_UP_STATUS.DONE) return 'Temuan sudah ditutup.';
   if (followUp.status === FOLLOW_UP_STATUS.NEED_ACTION) return `Menunggu update dari ${assignee.label}.`;
   if (followUp.status === FOLLOW_UP_STATUS.NEED_REVIEW) return 'Menunggu feedback PIC Security.';
   if (followUp.status === FOLLOW_UP_STATUS.NEED_VERIFICATION) return `Menunggu verifikasi petugas pelapor (${reporterName}).`;
@@ -457,13 +459,13 @@ const ENTRY_TITLES = {
   verify: 'Verifikasi Pelapor',
 };
 
-function FollowUpSection({ incident, followUp, sequence, simRole, securityName, reporterName, onPreviewPhoto, onAction }) {
+function FollowUpSection({ incident, followUp, sequence, simRole, securityName, reporterName, isClosed, onPreviewPhoto, onAction }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const assignee = getAssigneeMeta(followUp.assigneeId, securityName);
   const createdStamp = formatFollowUpTimestamp(followUp.createdAt);
-  const canUpdate = followUp.status === FOLLOW_UP_STATUS.NEED_ACTION && simRole === followUp.assigneeId;
-  const canReview = followUp.status === FOLLOW_UP_STATUS.NEED_REVIEW && simRole === SECURITY_ASSIGNEE_ID;
-  const canVerify = followUp.status === FOLLOW_UP_STATUS.NEED_VERIFICATION && simRole === REPORTER_ROLE_ID;
+  const canUpdate = !isClosed && followUp.status === FOLLOW_UP_STATUS.NEED_ACTION && simRole === followUp.assigneeId;
+  const canReview = !isClosed && followUp.status === FOLLOW_UP_STATUS.NEED_REVIEW && simRole === SECURITY_ASSIGNEE_ID;
+  const canVerify = !isClosed && followUp.status === FOLLOW_UP_STATUS.NEED_VERIFICATION && simRole === REPORTER_ROLE_ID;
   const hasAction = canUpdate || canReview || canVerify;
   const activityEntries = followUp.entries.filter((entry) => entry.kind !== 'assign');
 
@@ -558,14 +560,14 @@ function FollowUpSection({ incident, followUp, sequence, simRole, securityName, 
               <CheckCircle2 className="w-4 h-4" /> Verifikasi
             </button>
           )}
-          {!hasAction && <p className="text-[11px] text-cyan-600 italic">{getWaitingHint(followUp, assignee, reporterName)}</p>}
+          {!hasAction && <p className="text-[11px] text-cyan-600 italic">{getWaitingHint(followUp, assignee, reporterName, isClosed)}</p>}
         </div>
       )}
     </div>
   );
 }
 
-export function FollowUpSectionList({ incident, followUps, simRole, securityName, reporterName, onToast, onPreviewPhoto }) {
+export function FollowUpSectionList({ incident, followUps, simRole, securityName, reporterName, isClosed, onToast, onPreviewPhoto }) {
   const [activeAction, setActiveAction] = useState(null);
   const closeAction = () => setActiveAction(null);
 
@@ -591,6 +593,7 @@ export function FollowUpSectionList({ incident, followUps, simRole, securityName
               followUp={followUp}
               sequence={index + 1}
               simRole={simRole}
+              isClosed={isClosed}
               securityName={securityName}
               reporterName={reporterName}
               onPreviewPhoto={onPreviewPhoto}
@@ -644,5 +647,45 @@ export function FollowUpSectionList({ incident, followUps, simRole, securityName
         />
       )}
     </div>
+  );
+}
+
+export function CloseIncidentModal({ incident, followUps, securityName, reporterName, onClose, onClosed }) {
+  const [comment, setComment] = useState('');
+  const [photoUrl, setPhotoUrl] = useState(null);
+  const canSubmit = Boolean(comment.trim()) && Boolean(photoUrl);
+  const pendingVerification = followUps
+    .map((followUp, index) => ({ followUp, sequence: index + 1 }))
+    .filter(({ followUp }) => followUp.status === FOLLOW_UP_STATUS.NEED_VERIFICATION);
+  const stillOpenCount = followUps.filter((followUp) => (
+    followUp.status === FOLLOW_UP_STATUS.NEED_ACTION || followUp.status === FOLLOW_UP_STATUS.NEED_REVIEW
+  )).length;
+
+  const handleSubmit = () => {
+    if (!canSubmit) return;
+    closeIncidentWithVerification(incident.id, { comment: comment.trim(), photoUrl, actorName: reporterName });
+    onClosed();
+  };
+
+  return (
+    <FollowUpModal title="Tutup Temuan" subtitle={`${incident.location || 'Temuan'} · ${reporterName}`} onClose={onClose} onSubmit={handleSubmit} submitLabel="Verifikasi & Tutup" canSubmit={canSubmit}>
+      <div className="p-3 rounded-xl border border-fuchsia-900/50 bg-fuchsia-950/20 space-y-2">
+        <p className="text-[9px] font-bold uppercase tracking-widest text-fuchsia-400">Tindak lanjut yang diverifikasi</p>
+        {pendingVerification.map(({ followUp, sequence }) => (
+          <div key={followUp.id}>
+            <p className="text-xs font-bold text-cyan-50">#{sequence} · {getAssigneeMeta(followUp.assigneeId, securityName).label}</p>
+            <p className="text-[11px] text-cyan-300 whitespace-pre-wrap">{followUp.instruction}</p>
+          </div>
+        ))}
+      </div>
+      {stillOpenCount > 0 && (
+        <p className="text-[11px] text-amber-300 flex items-start gap-1.5"><AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> Masih ada {stillOpenCount} tindak lanjut lain yang belum selesai. Temuan tetap akan ditutup.</p>
+      )}
+      <div>
+        <label className={LABEL_CLASS}>Catatan Verifikasi <span className="text-rose-400">*</span></label>
+        <textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={3} placeholder="Jelaskan kondisi di lapangan saat verifikasi..." className={TEXTAREA_CLASS} />
+      </div>
+      <PhotoField label="Evidence" value={photoUrl} onChange={setPhotoUrl} required />
+    </FollowUpModal>
   );
 }

@@ -127,12 +127,21 @@ export function submitSecurityReview(incidentId, followUpId, { approved, request
   }));
 }
 
+// Mengembalikan true bila verifikasi ini membuat semua tindak lanjut Done → temuan otomatis ditutup.
 export function submitReporterVerification(incidentId, followUpId, { approved, comment, photoUrl, actorName }) {
   updateFollowUp(incidentId, followUpId, (item) => ({
     ...item,
     status: approved ? FOLLOW_UP_STATUS.DONE : FOLLOW_UP_STATUS.NEED_ACTION,
     entries: [...item.entries, createEntry('verify', { actorName, actorRole: 'Petugas Pelapor', comment, photoUrl, verdict: approved ? 'approved' : 'rejected' })],
   }));
+
+  const key = String(incidentId || '');
+  const items = followUpsByIncident.get(key) || EMPTY_LIST;
+  const allDone = items.length > 0 && items.every((item) => item.status === FOLLOW_UP_STATUS.DONE);
+  if (!approved || !allDone || closuresByIncident.has(key)) return false;
+  closuresByIncident.set(key, { id: createId('fu-close'), at: new Date().toISOString(), actorName, comment: '', photoUrl: null });
+  emitChange();
+  return true;
 }
 
 // Contoh data agar keempat status bisa langsung dilihat tanpa menjalankan alur dari awal.
@@ -193,7 +202,7 @@ export function buildFollowUpLogItems(followUps, securityName, closure = null) {
       createdAt: closure.at,
       author: closure.actorName,
       tag: 'Temuan Ditutup',
-      headline: 'Petugas Pelapor menutup temuan setelah verifikasi',
+      headline: 'Otomatis ditutup — semua tindak lanjut selesai & terverifikasi petugas',
       comment: closure.comment,
       photoUrl: closure.photoUrl,
     });

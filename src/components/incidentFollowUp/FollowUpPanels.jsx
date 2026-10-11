@@ -355,8 +355,8 @@ function VerifyFollowUpModal({ incident, followUp, sequence, reporterName, onClo
 
   const handleSubmit = () => {
     if (!canSubmit) return;
-    submitReporterVerification(incident.id, followUp.id, { approved, comment: comment.trim(), photoUrl, actorName: reporterName });
-    onSubmitted(approved);
+    const closedIncident = submitReporterVerification(incident.id, followUp.id, { approved, comment: comment.trim(), photoUrl, actorName: reporterName });
+    onSubmitted({ approved, closedIncident });
   };
 
   return (
@@ -657,11 +657,11 @@ export function FollowUpSectionList({ incident, followUps, simRole, securityName
           sequence={activeAction.sequence}
           reporterName={reporterName}
           onClose={closeAction}
-          onSubmitted={(approved) => {
+          onSubmitted={({ approved, closedIncident }) => {
             closeAction();
-            onToast(approved
-              ? 'Verifikasi terkirim. Tindak lanjut selesai (Done).'
-              : 'Verifikasi ditolak. Status kembali ke Need Action.');
+            if (!approved) onToast('Verifikasi ditolak. Status kembali ke Need Action.');
+            else if (closedIncident) onToast('Verifikasi terkirim. Semua tindak lanjut Done — temuan otomatis ditutup (Closed).');
+            else onToast('Verifikasi terkirim. Tindak lanjut selesai (Done).');
           }}
         />
       )}

@@ -97,14 +97,14 @@ function PhotoField({ label, value, onChange, required = false }) {
 }
 
 function VerdictToggle({ value, onChange, approveLabel = 'Sudah Sesuai', rejectLabel = 'Belum Sesuai' }) {
-  const baseClass = 'flex-1 py-3 rounded-xl border text-[11px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 transition-all';
+  const baseClass = 'flex-1 py-3 rounded-xl border flex items-center justify-center transition-all';
   return (
     <div className="flex gap-3">
-      <button type="button" onClick={() => onChange(true)} className={`${baseClass} ${value === true ? 'bg-emerald-600 border-emerald-400 text-white' : 'border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10'}`}>
-        <CheckCircle2 className="w-4 h-4" /> {approveLabel}
+      <button type="button" onClick={() => onChange(true)} aria-label={approveLabel} aria-pressed={value === true} title={approveLabel} className={`${baseClass} ${value === true ? 'bg-emerald-600 border-emerald-400 text-white' : 'border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10'}`}>
+        <CheckCircle2 className="w-7 h-7" />
       </button>
-      <button type="button" onClick={() => onChange(false)} className={`${baseClass} ${value === false ? 'bg-rose-600 border-rose-400 text-white' : 'border-rose-500/30 text-rose-400 hover:bg-rose-500/10'}`}>
-        <XCircle className="w-4 h-4" /> {rejectLabel}
+      <button type="button" onClick={() => onChange(false)} aria-label={rejectLabel} aria-pressed={value === false} title={rejectLabel} className={`${baseClass} ${value === false ? 'bg-rose-600 border-rose-400 text-white' : 'border-rose-500/30 text-rose-400 hover:bg-rose-500/10'}`}>
+        <XCircle className="w-7 h-7" />
       </button>
     </div>
   );
@@ -124,8 +124,7 @@ function FollowUpModal({ title, subtitle, onClose, onSubmit, submitLabel, canSub
         </div>
         <div className="p-6 space-y-5 overflow-y-auto">{children}</div>
         <div className="p-5 bg-[#070b19]/40 border-t border-cyan-800/30 flex gap-4 shrink-0">
-          <button type="button" onClick={onClose} className="flex-1 py-4 text-xs font-bold text-cyan-700 hover:text-cyan-400 transition-colors uppercase tracking-widest">Batal</button>
-          <button type="button" disabled={!canSubmit} onClick={onSubmit} className="flex-[2] bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-xl shadow-emerald-500/20 active:scale-95 border border-emerald-400/20 flex items-center justify-center gap-2">
+          <button type="button" disabled={!canSubmit} onClick={onSubmit} className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-xl shadow-emerald-500/20 active:scale-95 border border-emerald-400/20 flex items-center justify-center gap-2">
             <Send className="w-4 h-4" /> {submitLabel}
           </button>
         </div>
@@ -332,7 +331,7 @@ function ReviewFollowUpModal({ incident, followUp, sequence, securityName, onClo
   };
 
   return (
-    <FollowUpModal title="Feedback PIC Security" subtitle={`Tindak lanjut #${sequence}`} onClose={onClose} onSubmit={handleSubmit} submitLabel={approved ? 'Minta Verifikasi' : 'Kirim Feedback'} canSubmit={canSubmit}>
+    <FollowUpModal title="Feedback PIC Security" subtitle={`Tindak lanjut #${sequence}`} onClose={onClose} onSubmit={handleSubmit} submitLabel={approved ? 'Need Verification' : 'Submit'} canSubmit={canSubmit}>
       {latestUpdate && (
         <div className="p-3 rounded-xl border border-sky-900/50 bg-sky-950/20">
           <p className="text-[9px] font-bold uppercase tracking-widest text-sky-500 mb-1">Update terakhir · {latestUpdate.actorName}</p>

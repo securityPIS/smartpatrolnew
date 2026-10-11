@@ -182,11 +182,26 @@ export function FollowUpToast({ toast, onDismiss }) {
 }
 
 export function FollowUpRoleSwitcher({ simRole, onChange }) {
+  const [isVisible, setIsVisible] = useState(false);
   const options = getSimulationRoleOptions();
+  const activeLabel = options.find((option) => option.id === simRole)?.label || '-';
   return (
-    <div className="px-4 py-2.5 bg-[#070b19] border-b border-cyan-900/50 shrink-0">
-      <p className="text-[9px] font-bold uppercase tracking-widest text-cyan-600 mb-1.5 flex items-center gap-1.5"><UserCheck className="w-3 h-3" /> Simulasi tindak lanjut sebagai (data dummy)</p>
-      <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+    <div className="px-4 py-2 bg-[#070b19] border-b border-cyan-900/50 shrink-0">
+      <button
+        type="button"
+        onClick={() => setIsVisible((value) => !value)}
+        className="w-full flex items-center gap-1.5 text-left"
+        aria-expanded={isVisible}
+        aria-label={isVisible ? 'Sembunyikan pilihan role simulasi' : 'Tampilkan pilihan role simulasi'}
+      >
+        <UserCheck className="w-3 h-3 text-cyan-600 shrink-0" />
+        <span className="flex-1 min-w-0 truncate text-[9px] font-bold uppercase tracking-widest text-cyan-600">
+          Simulasi sebagai: <span className="text-cyan-300">{activeLabel}</span>
+        </span>
+        <ChevronDown className={`w-3.5 h-3.5 text-cyan-600 shrink-0 transition-transform ${isVisible ? 'rotate-180' : ''}`} />
+      </button>
+      {isVisible && (
+      <div className="flex gap-2 overflow-x-auto pt-2 pb-1 -mx-1 px-1 animate-in fade-in">
         {options.map((option) => (
           <button
             key={option.id}
@@ -198,6 +213,7 @@ export function FollowUpRoleSwitcher({ simRole, onChange }) {
           </button>
         ))}
       </div>
+      )}
     </div>
   );
 }

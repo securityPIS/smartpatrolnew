@@ -6,11 +6,13 @@ Main Functions: Render detail temuan, tambah progress/dokumentasi, edit info, tu
 Side Effects: Memanggil handler context untuk mutasi temuan dan membuka preview foto/map eksternal.
 */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useIncidents, useReports, useRole, useShips } from '../../context/AppContextRuntime';
 import { ChevronDown, AlertTriangle, CheckCircle2, Camera, X, Plus, FileText, Trash2, Images, Pencil, Save, MapPin, ExternalLink } from 'lucide-react';
 import AsyncImage from '../AsyncImage';
 import { TimeAuditPills, TimeAuditRecordCard } from '../TimeAuditStatus';
+import { SECURITY_ASSIGNEE_ID, buildFollowUpLogItems, formatFollowUpTimestamp, useIncidentFollowUps } from '../incidentFollowUp/followUpStore';
+import { FollowUpAssignCard, FollowUpRoleSwitcher, FollowUpSectionList, FollowUpToast } from '../incidentFollowUp/FollowUpPanels';
 
 function normalizeIncidentMetaKeyPart(value) {
   return String(value || '')
@@ -100,6 +102,24 @@ function getIncidentDocumentationGalleryItems(incident, documentationItems = [],
   return galleryItems;
 }
 
+function getHistoryItemTimestamp(item) {
+  const timestamp = new Date(item?.createdAt || '').getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+// Gabungkan riwayat progress temuan dengan log tindak lanjut (dummy), urut kronologis.
+function mergeIncidentHistoryItems(progressItems = [], followUpLogItems = []) {
+  if (followUpLogItems.length === 0) return progressItems;
+  return [...progressItems, ...followUpLogItems]
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => (getHistoryItemTimestamp(left.item) - getHistoryItemTimestamp(right.item)) || (left.index - right.index))
+    .map(({ item }) => {
+      if (!item.isFollowUpLog) return item;
+      const stamp = formatFollowUpTimestamp(item.createdAt);
+      return { ...item, date: stamp.date, time: stamp.time };
+    });
+}
+
 function normalizeMapCoordinate(value, digits = 6) {
   const numeric = typeof value === 'number'
     ? value
@@ -167,7 +187,7 @@ export default function IncidentDetailView({ isInline = false }) {
     setNewProgress, handlePhotoProgress, handleUpdateIncidentPhoto, handleAddIncidentDocumentation,
     handleUpdateIncidentInfo,
   } = useIncidents();
-  const { isAdmin, isPic } = useRole();
+  const { isAdmin, isPic, currentUserRecord } = useRole();
   const { setPreviewPhoto } = useReports();
   const { shipsData } = useShips();
 
@@ -175,6 +195,11 @@ export default function IncidentDetailView({ isInline = false }) {
   const [showUpdateForm, setShowUpdateForm] = useState(false);
   const [activeInfoEditor, setActiveInfoEditor] = useState(null);
   const [incidentInfoForm, setIncidentInfoForm] = useState(() => createIncidentInfoState(null));
+  const [followUpSimRole, setFollowUpSimRole] = useState(SECURITY_ASSIGNEE_ID);
+  const [followUpToast, setFollowUpToast] = useState(null);
+  const followUps = useIncidentFollowUps(selectedIncident?.id);
+  const dismissFollowUpToast = useCallback(() => setFollowUpToast(null), []);
+  const showFollowUpToast = useCallback((message) => setFollowUpToast({ id: Date.now(), message }), []);
 
   useEffect(() => {
     setIncidentInfoForm(createIncidentInfoState(selectedIncident));
@@ -225,6 +250,13 @@ export default function IncidentDetailView({ isInline = false }) {
   );
   const incidentMapsQuery = incidentMapConfig ? `${incidentMapConfig.lat},${incidentMapConfig.lng}` : '';
   const incidentMapsHref = incidentMapConfig ? `https://www.google.com/maps?q=${incidentMapsQuery}` : '#';
+  const showFollowUpFeature = !isSOSIncident;
+  const followUpSecurityName = (isPic && currentUserRecord?.name) || 'PIC Security';
+  const followUpReporterName = selectedIncident.reportedBy || 'Petugas Pelapor';
+  const historyItems = mergeIncidentHistoryItems(
+    progressItems,
+    showFollowUpFeature ? buildFollowUpLogItems(followUps, followUpSecurityName) : [],
+  );
 
   const saveIncidentInfo = () => {
     const didUpdate = handleUpdateIncidentInfo(selectedIncident.id, incidentInfoForm);
@@ -345,6 +377,10 @@ export default function IncidentDetailView({ isInline = false }) {
         <button onClick={() => setActiveTab('documentation')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-all border-b-2 ${activeTab === 'documentation' ? 'text-fuchsia-400 border-fuchsia-500 bg-fuchsia-500/5' : 'text-cyan-600 border-transparent hover:text-cyan-400'}`}>Dokumentasi</button>
         <button onClick={() => setActiveTab('info')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-all border-b-2 ${activeTab === 'info' ? (isSOSIncident ? 'text-rose-300 border-rose-500 bg-rose-500/5' : 'text-yellow-400 border-yellow-500 bg-yellow-500/5') : 'text-cyan-600 border-transparent hover:text-cyan-400'}`}>Info (5W1H)</button>
       </div>
+
+      {showFollowUpFeature && activeTab !== 'documentation' && (
+        <FollowUpRoleSwitcher simRole={followUpSimRole} onChange={setFollowUpSimRole} />
+      )}
 
       <div className="flex-1 overflow-y-auto p-5 space-y-6 text-cyan-50">
         {activeTab === 'info' ? (
@@ -472,6 +508,16 @@ export default function IncidentDetailView({ isInline = false }) {
               ) : renderInfoValue(selectedIncident.tindakLanjut, `${isSOSIncident ? 'text-rose-50/90' : 'text-emerald-50/90'} incident-info-value`)}
             </div>
 
+            {showFollowUpFeature && (
+              <FollowUpAssignCard
+                incident={selectedIncident}
+                followUps={followUps}
+                simRole={followUpSimRole}
+                securityName={followUpSecurityName}
+                onToast={showFollowUpToast}
+                onOpenUpdateTab={() => setActiveTab('update')}
+              />
+            )}
 
           </div>
         ) : activeTab === 'documentation' ? (
@@ -524,20 +570,37 @@ export default function IncidentDetailView({ isInline = false }) {
                 : <span className={`text-[10px] px-3 py-1.5 border rounded font-black tracking-widest ${isSOSIncident ? 'bg-rose-500/10 border-rose-500 text-rose-300' : 'bg-yellow-500/10 border-yellow-500 text-yellow-400'}`}>{isSOSIncident ? 'ACTIVE SOS' : 'OPEN'}</span>}
             </div>
 
+            {showFollowUpFeature && (
+              <FollowUpSectionList
+                incident={selectedIncident}
+                followUps={followUps}
+                simRole={followUpSimRole}
+                securityName={followUpSecurityName}
+                reporterName={followUpReporterName}
+                onToast={showFollowUpToast}
+                onPreviewPhoto={setPreviewPhoto}
+              />
+            )}
+
             <div className="pt-2">
               <h4 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4 flex items-center gap-2"><FileText className="w-4 h-4" /> RIWAYAT UPDATE</h4>
               <div className="space-y-5 border-l-2 border-cyan-800 ml-2 pl-5">
-                {progressItems.map((prog, idx) => (
-                  <div key={idx} className="relative">
-                    <div className="absolute -left-[25px] top-0 w-3 h-3 rounded-full bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)] border-2 border-[#070b19]"></div>
+                {historyItems.map((prog, idx) => (
+                  <div key={prog.id || idx} className="relative">
+                    <div className={`absolute -left-[25px] top-0 w-3 h-3 rounded-full border-2 border-[#070b19] ${prog.isFollowUpLog ? 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.8)]' : 'bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)]'}`}></div>
                     <p className="text-[10px] font-mono text-cyan-500 mb-1.5">{prog.date} {prog.time} {' · '} <span className="text-emerald-400 font-bold">{prog.author}</span></p>
                     <div className="flex gap-3 items-start bg-[#0b1229] p-3.5 rounded-xl border border-cyan-900/50 shadow-sm hover:border-cyan-700 transition-colors">
-                      <p className="text-sm text-cyan-50 flex-1 whitespace-pre-wrap leading-relaxed">{prog.comment}</p>
+                      <div className="flex-1 min-w-0">
+                        {prog.isFollowUpLog && (
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-1">{prog.tag} {' · '} <span className="normal-case tracking-normal font-semibold text-cyan-300">{prog.headline}</span></p>
+                        )}
+                        {prog.comment && <p className="text-sm text-cyan-50 whitespace-pre-wrap leading-relaxed">{prog.comment}</p>}
+                      </div>
                       {prog.photoUrl && <div className="w-20 h-20 rounded-lg overflow-hidden border border-cyan-800 flex-shrink-0 cursor-pointer hover:opacity-80 transition-all relative group" onClick={() => setPreviewPhoto({ url: prog.photoUrl, author: prog.author, time: `${prog.date} ${prog.time}` })}><AsyncImage src={prog.thumbUrl} fallbackSrc={prog.photoUrl} className="w-full h-full object-cover" alt="Progress" /></div>}
                     </div>
                   </div>
                 ))}
-                {progressItems.length === 0 && (
+                {historyItems.length === 0 && (
                   <p className="text-sm text-cyan-700 italic border border-dashed border-cyan-900/50 p-4 rounded-xl text-center">{isSOSIncident ? 'Belum ada update tindak lanjut SOS.' : 'Belum ada update progres.'}</p>
                 )}
               </div>
@@ -563,6 +626,8 @@ export default function IncidentDetailView({ isInline = false }) {
           <button onClick={() => handleCloseIncident(selectedIncident.id)} className="w-full py-4 rounded-xl font-black uppercase tracking-widest text-xs border border-rose-500 text-rose-400 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(244,63,94,0.15)]"><CheckCircle2 className="w-5 h-5" /> {isSOSIncident ? 'Tutup SOS (Selesai)' : 'Tutup Temuan (Selesai)'}</button>
         </div>
       )}
+
+      <FollowUpToast toast={followUpToast} onDismiss={dismissFollowUpToast} />
 
       {showUpdateForm && (
         <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-4">

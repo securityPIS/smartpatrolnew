@@ -247,6 +247,13 @@ export default function IncidentDetailView({ isInline = false }) {
   const titleClass = isSOSIncident ? 'text-rose-300' : 'text-yellow-400';
   const panelBorderClass = isSOSIncident ? 'border-rose-900/30' : 'border-yellow-900/30';
   const panelClass = isSOSIncident ? 'bg-rose-950/20' : 'bg-yellow-950/20';
+  const isIncidentClosed = incidentStatus === 'closed';
+  const headerStatusLabel = isSOSIncident
+    ? (isIncidentClosed ? 'SOS Resolved' : 'SOS Active')
+    : (isIncidentClosed ? 'Temuan Closed' : 'Temuan Open');
+  const headerStatusClass = isSOSIncident
+    ? (isIncidentClosed ? 'text-rose-300/70' : 'text-rose-400')
+    : (isIncidentClosed ? 'text-slate-400' : 'text-yellow-400');
   const auditTitle = isSOSIncident ? 'Audit Timestamp SOS' : 'Audit Timestamp Temuan';
   const documentationGalleryItems = useMemo(
     () => getIncidentDocumentationGalleryItems(selectedIncident, documentationItems, progressItems),
@@ -345,7 +352,7 @@ export default function IncidentDetailView({ isInline = false }) {
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <span className={`text-[10px] uppercase tracking-widest font-bold ${isSOSIncident ? 'text-rose-400' : 'text-cyan-500'}`}>{isSOSIncident ? 'Informasi SOS' : 'Detail Temuan'}</span>
+              <span className={`text-[10px] uppercase tracking-widest font-bold ${headerStatusClass}`}>{headerStatusLabel}</span>
               <h3 className={`font-bold text-lg leading-tight line-clamp-1 ${titleClass}`}>{selectedIncident.location}</h3>
             </div>
             <ChevronDown className={`w-5 h-5 text-cyan-500 shrink-0 transition-transform ${isHeaderExpanded ? 'rotate-180' : ''}`} />
@@ -583,13 +590,6 @@ export default function IncidentDetailView({ isInline = false }) {
           </div>
         ) : (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <div className="flex justify-between items-center bg-[#0b1229] p-3 rounded-xl border border-cyan-900/50 shadow-sm">
-              <span className="text-xs font-bold text-cyan-400 uppercase tracking-widest">Status Terkini</span>
-              {incidentStatus === 'closed'
-                ? <span className={`text-[10px] px-3 py-1.5 border rounded font-black tracking-widest ${isSOSIncident ? 'bg-rose-950/30 border-rose-700 text-rose-300' : 'bg-slate-800 border-slate-600 text-slate-400'}`}>{isSOSIncident ? 'RESOLVED' : 'CLOSED'}</span>
-                : <span className={`text-[10px] px-3 py-1.5 border rounded font-black tracking-widest ${isSOSIncident ? 'bg-rose-500/10 border-rose-500 text-rose-300' : 'bg-yellow-500/10 border-yellow-500 text-yellow-400'}`}>{isSOSIncident ? 'ACTIVE SOS' : 'OPEN'}</span>}
-            </div>
-
             {showFollowUpFeature && (
               <FollowUpSectionList
                 incident={selectedIncident}

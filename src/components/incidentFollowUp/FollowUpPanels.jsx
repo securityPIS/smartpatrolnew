@@ -27,13 +27,6 @@ import {
 } from './followUpStore';
 import { buildFollowUpPdfFileName, openFollowUpPdf } from './followUpPdf';
 
-const STATUS_STEPS = [
-  FOLLOW_UP_STATUS.NEED_ACTION,
-  FOLLOW_UP_STATUS.NEED_REVIEW,
-  FOLLOW_UP_STATUS.NEED_VERIFICATION,
-  FOLLOW_UP_STATUS.DONE,
-];
-
 const LABEL_CLASS = 'text-[10px] font-mono text-cyan-500 block uppercase tracking-widest font-bold mb-2 ml-1';
 const TEXTAREA_CLASS = 'w-full bg-[#070b19]/60 border border-cyan-800/40 rounded-2xl p-4 text-sm text-cyan-50 focus:border-emerald-500/50 outline-none resize-none';
 
@@ -162,23 +155,6 @@ function DocumentCard({ fileName, onOpen, note }) {
 function StatusBadge({ status }) {
   const meta = FOLLOW_UP_STATUS_META[status] || FOLLOW_UP_STATUS_META[FOLLOW_UP_STATUS.NEED_ACTION];
   return <span className={`text-[9px] px-2 py-1 border rounded font-black tracking-widest uppercase whitespace-nowrap ${meta.badgeClass}`}>{meta.label}</span>;
-}
-
-function StatusStepper({ status }) {
-  const activeIndex = STATUS_STEPS.indexOf(status);
-  return (
-    <div className="flex items-center gap-1">
-      {STATUS_STEPS.map((step, index) => {
-        const isReached = index <= activeIndex;
-        return (
-          <div key={step} className="flex-1">
-            <div className={`h-1.5 rounded-full ${isReached ? (status === FOLLOW_UP_STATUS.DONE ? 'bg-emerald-400' : 'bg-cyan-400') : 'bg-cyan-900/50'}`}></div>
-            <p className={`mt-1 text-[8px] font-bold uppercase tracking-wider ${index === activeIndex ? 'text-cyan-200' : 'text-cyan-700'}`}>{FOLLOW_UP_STATUS_META[step].label}</p>
-          </div>
-        );
-      })}
-    </div>
-  );
 }
 
 export function FollowUpToast({ toast, onDismiss }) {
@@ -458,13 +434,19 @@ const ENTRY_TITLES = {
   verify: 'Verifikasi Pelapor',
 };
 
+function getFollowUpActions(followUp, simRole, isClosed) {
+  return {
+    canUpdate: !isClosed && followUp.status === FOLLOW_UP_STATUS.NEED_ACTION && simRole === followUp.assigneeId,
+    canReview: !isClosed && followUp.status === FOLLOW_UP_STATUS.NEED_REVIEW && simRole === SECURITY_ASSIGNEE_ID,
+    canVerify: !isClosed && followUp.status === FOLLOW_UP_STATUS.NEED_VERIFICATION && simRole === REPORTER_ROLE_ID,
+  };
+}
+
 function FollowUpSection({ incident, followUp, sequence, simRole, securityName, reporterName, isClosed, onPreviewPhoto, onAction }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const assignee = getAssigneeMeta(followUp.assigneeId, securityName);
   const createdStamp = formatFollowUpTimestamp(followUp.createdAt);
-  const canUpdate = !isClosed && followUp.status === FOLLOW_UP_STATUS.NEED_ACTION && simRole === followUp.assigneeId;
-  const canReview = !isClosed && followUp.status === FOLLOW_UP_STATUS.NEED_REVIEW && simRole === SECURITY_ASSIGNEE_ID;
-  const canVerify = !isClosed && followUp.status === FOLLOW_UP_STATUS.NEED_VERIFICATION && simRole === REPORTER_ROLE_ID;
+  const { canUpdate, canReview, canVerify } = getFollowUpActions(followUp, simRole, isClosed);
   const hasAction = canUpdate || canReview || canVerify;
   const activityEntries = followUp.entries.filter((entry) => entry.kind !== 'assign');
 
@@ -485,8 +467,6 @@ function FollowUpSection({ incident, followUp, sequence, simRole, securityName, 
 
       {isExpanded && (
         <div className="px-3.5 pb-4 space-y-4 border-t border-cyan-900/40 pt-4 animate-in fade-in">
-          <StatusStepper status={followUp.status} />
-
           <div>
             <p className="text-[9px] font-bold uppercase tracking-widest text-cyan-600 mb-1">Instruksi · {followUp.createdBy}</p>
             <p className="text-sm text-cyan-50 whitespace-pre-wrap leading-relaxed">{followUp.instruction}</p>
@@ -568,6 +548,9 @@ function FollowUpSection({ incident, followUp, sequence, simRole, securityName, 
 
 export function FollowUpSectionList({ incident, followUps, simRole, securityName, reporterName, isClosed, onToast, onPreviewPhoto }) {
   const [activeAction, setActiveAction] = useState(null);
+  const [isListExpanded, setIsListExpanded] = useState(false);
+  const doneCount = followUps.filter((followUp) => followUp.status === FOLLOW_UP_STATUS.DONE).length;
+  const myActionCount = followUps.filter((followUp) => Object.values(getFollowUpActions(followUp, simRole, isClosed)).some(Boolean)).length;
   const closeAction = () => setActiveAction(null);
 
   const handleSeedDemo = () => {
@@ -577,30 +560,47 @@ export function FollowUpSectionList({ incident, followUps, simRole, securityName
 
   return (
     <div>
-      <h4 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-3 flex items-center gap-2"><ClipboardList className="w-4 h-4" /> TINDAK LANJUT ({followUps.length})</h4>
-      {followUps.length === 0 ? (
-        <div className="text-center border border-dashed border-cyan-900/50 p-4 rounded-xl space-y-2">
-          <p className="text-sm text-cyan-700 italic">Belum ada tindak lanjut. PIC Security dapat menugaskan dari tab Info (5W1H) di bawah HOW.</p>
-          <button type="button" onClick={handleSeedDemo} className="text-[10px] font-bold uppercase tracking-widest text-cyan-400 hover:text-cyan-200 underline underline-offset-4">Muat data contoh</button>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {followUps.map((followUp, index) => (
-            <FollowUpSection
-              key={followUp.id}
-              incident={incident}
-              followUp={followUp}
-              sequence={index + 1}
-              simRole={simRole}
-              isClosed={isClosed}
-              securityName={securityName}
-              reporterName={reporterName}
-              onPreviewPhoto={onPreviewPhoto}
-              onAction={(type, item, sequence) => setActiveAction({ type, followUp: item, sequence })}
-            />
-          ))}
-        </div>
-      )}
+      <div className={`rounded-xl border bg-[#0b1229]/60 shadow-sm ${myActionCount > 0 ? 'border-emerald-500/40' : 'border-cyan-900/50'}`}>
+        <button type="button" onClick={() => setIsListExpanded((value) => !value)} className="w-full p-3.5 flex items-center gap-3 text-left" aria-expanded={isListExpanded} aria-label="Daftar tindak lanjut">
+          <ClipboardList className="w-4 h-4 text-cyan-400 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold text-cyan-400 uppercase tracking-widest">Tindak Lanjut ({followUps.length})</p>
+            <p className="text-[10px] text-cyan-600 mt-0.5">
+              {followUps.length === 0 ? 'Belum ada tindak lanjut' : `${doneCount} selesai · ${followUps.length - doneCount} berjalan`}
+            </p>
+          </div>
+          {myActionCount > 0 && <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-wider shrink-0">{myActionCount} perlu tindakan</span>}
+          <ChevronDown className={`w-4 h-4 text-cyan-600 shrink-0 transition-transform ${isListExpanded ? 'rotate-180' : ''}`} />
+        </button>
+
+        {isListExpanded && (
+          <div className="px-3 pb-3 animate-in fade-in">
+            {followUps.length === 0 ? (
+              <div className="text-center border border-dashed border-cyan-900/50 p-4 rounded-xl space-y-2">
+                <p className="text-sm text-cyan-700 italic">Belum ada tindak lanjut. PIC Security dapat menugaskan dari tab Info (5W1H) di bawah HOW.</p>
+                <button type="button" onClick={handleSeedDemo} className="text-[10px] font-bold uppercase tracking-widest text-cyan-400 hover:text-cyan-200 underline underline-offset-4">Muat data contoh</button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {followUps.map((followUp, index) => (
+                  <FollowUpSection
+                    key={followUp.id}
+                    incident={incident}
+                    followUp={followUp}
+                    sequence={index + 1}
+                    simRole={simRole}
+                    isClosed={isClosed}
+                    securityName={securityName}
+                    reporterName={reporterName}
+                    onPreviewPhoto={onPreviewPhoto}
+                    onAction={(type, item, sequence) => setActiveAction({ type, followUp: item, sequence })}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {activeAction?.type === 'update' && (
         <UpdateFollowUpModal

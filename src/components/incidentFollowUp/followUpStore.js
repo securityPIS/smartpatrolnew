@@ -76,8 +76,8 @@ function updateFollowUp(incidentId, followUpId, updater) {
   updateIncidentFollowUps(incidentId, (items) => items.map((item) => (item.id === followUpId ? updater(item) : item)));
 }
 
-function createEntry(kind, { actorName, actorRole, comment = '', photoUrl = null, verdict = null, at = new Date().toISOString() }) {
-  return { id: createId('fu-entry'), kind, actorName, actorRole, comment, photoUrl, verdict, at };
+function createEntry(kind, { actorName, actorRole, comment = '', photoUrl = null, verdict = null, skipVerification = false, at = new Date().toISOString() }) {
+  return { id: createId('fu-entry'), kind, actorName, actorRole, comment, photoUrl, verdict, skipVerification, at };
 }
 
 export function useIncidentFollowUps(incidentId) {
@@ -134,11 +134,15 @@ export function submitFollowUpUpdate(incidentId, followUpId, { comment, photoUrl
   }));
 }
 
-export function submitSecurityReview(incidentId, followUpId, { approved, comment, actorName }) {
+// approved + requestVerification=false → langsung Done tanpa verifikasi petugas pelapor.
+export function submitSecurityReview(incidentId, followUpId, { approved, requestVerification = true, comment, actorName }) {
+  const skipVerification = approved && !requestVerification;
+  let nextStatus = FOLLOW_UP_STATUS.NEED_ACTION;
+  if (approved) nextStatus = skipVerification ? FOLLOW_UP_STATUS.DONE : FOLLOW_UP_STATUS.NEED_VERIFICATION;
   updateFollowUp(incidentId, followUpId, (item) => ({
     ...item,
-    status: approved ? FOLLOW_UP_STATUS.NEED_VERIFICATION : FOLLOW_UP_STATUS.NEED_ACTION,
-    entries: [...item.entries, createEntry('review', { actorName, actorRole: 'PIC Security', comment, verdict: approved ? 'approved' : 'rejected' })],
+    status: nextStatus,
+    entries: [...item.entries, createEntry('review', { actorName, actorRole: 'PIC Security', comment, verdict: approved ? 'approved' : 'rejected', skipVerification })],
   }));
 }
 
@@ -217,7 +221,10 @@ export function buildFollowUpLogItems(followUps, securityName, closure = null) {
     const assignee = getAssigneeMeta(followUp.assigneeId, securityName);
     followUp.entries.forEach((entry) => {
       let verdictText = '';
-      if (entry.kind === 'review') verdictText = entry.verdict === 'approved' ? ' — SESUAI, diteruskan ke verifikasi pelapor' : ' — BELUM SESUAI, dikembalikan ke PIC';
+      if (entry.kind === 'review') {
+        if (entry.verdict !== 'approved') verdictText = ' — BELUM SESUAI, dikembalikan ke PIC';
+        else verdictText = entry.skipVerification ? ' — SESUAI, dikonfirmasi selesai tanpa verifikasi (Done)' : ' — SESUAI, diteruskan ke verifikasi pelapor';
+      }
       if (entry.kind === 'verify') verdictText = entry.verdict === 'approved' ? ' — TERVERIFIKASI (Done)' : ' — DITOLAK, dikembalikan ke PIC';
       const target = entry.kind === 'assign' ? ` ke ${assignee.label}` : '';
       logs.push({

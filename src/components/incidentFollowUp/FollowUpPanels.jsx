@@ -103,7 +103,11 @@ function VerdictToggle({ value, onChange, approveLabel = 'Sudah Sesuai', rejectL
   );
 }
 
-function FollowUpModal({ title, subtitle, onClose, onSubmit, submitLabel, canSubmit, children }) {
+const PRIMARY_ACTION_CLASS = 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20 border-emerald-400/20';
+
+// `actions` opsional: beberapa tombol submit berdampingan; default satu tombol submit.
+function FollowUpModal({ title, subtitle, onClose, onSubmit, submitLabel, canSubmit, actions, children }) {
+  const footerActions = actions || [{ key: 'submit', label: submitLabel, onClick: onSubmit, disabled: !canSubmit, colorClass: PRIMARY_ACTION_CLASS }];
   return (
     <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-4">
       <div className="absolute inset-0 bg-[#070b19]/90 backdrop-blur-md animate-in fade-in" onClick={onClose}></div>
@@ -116,10 +120,12 @@ function FollowUpModal({ title, subtitle, onClose, onSubmit, submitLabel, canSub
           <button type="button" onClick={onClose} className="p-2 hover:bg-white/5 rounded-xl transition-all" aria-label="Tutup"><X className="w-5 h-5 text-cyan-700" /></button>
         </div>
         <div className="p-6 space-y-5 overflow-y-auto">{children}</div>
-        <div className="p-5 bg-[#070b19]/40 border-t border-cyan-800/30 flex gap-4 shrink-0">
-          <button type="button" disabled={!canSubmit} onClick={onSubmit} className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-xl shadow-emerald-500/20 active:scale-95 border border-emerald-400/20 flex items-center justify-center gap-2">
-            <Send className="w-4 h-4" /> {submitLabel}
-          </button>
+        <div className="p-5 bg-[#070b19]/40 border-t border-cyan-800/30 flex gap-3 shrink-0">
+          {footerActions.map((action) => (
+            <button key={action.key} type="button" disabled={action.disabled} onClick={action.onClick} className={`flex-1 py-4 px-2 text-white disabled:opacity-50 rounded-2xl text-xs font-black uppercase whitespace-nowrap transition-all shadow-xl active:scale-95 border flex items-center justify-center gap-2 ${footerActions.length > 1 ? 'tracking-normal' : 'tracking-widest'} ${action.colorClass || PRIMARY_ACTION_CLASS}`}>
+              <Send className="w-4 h-4 shrink-0" /> {action.label}
+            </button>
+          ))}
         </div>
       </div>
     </div>
@@ -300,14 +306,19 @@ function ReviewFollowUpModal({ incident, followUp, sequence, securityName, onClo
   const latestUpdate = [...followUp.entries].reverse().find((entry) => entry.kind === 'update');
   const canSubmit = approved === true || (approved === false && Boolean(comment.trim()));
 
-  const handleSubmit = () => {
+  const handleSubmit = (requestVerification) => {
     if (!canSubmit) return;
-    submitSecurityReview(incident.id, followUp.id, { approved, comment: comment.trim(), actorName: securityName });
-    onSubmitted(approved);
+    submitSecurityReview(incident.id, followUp.id, { approved, requestVerification, comment: comment.trim(), actorName: securityName });
+    onSubmitted({ approved, requestVerification });
   };
 
+  const actions = [
+    { key: 'submit', label: 'Submit', onClick: () => handleSubmit(false), disabled: !canSubmit, colorClass: PRIMARY_ACTION_CLASS },
+    ...(approved ? [{ key: 'verify', label: 'Need Verification', onClick: () => handleSubmit(true), disabled: !canSubmit, colorClass: 'bg-fuchsia-600 hover:bg-fuchsia-500 shadow-fuchsia-500/20 border-fuchsia-400/20' }] : []),
+  ];
+
   return (
-    <FollowUpModal title="Feedback PIC Security" subtitle={`Tindak lanjut #${sequence}`} onClose={onClose} onSubmit={handleSubmit} submitLabel={approved ? 'Need Verification' : 'Submit'} canSubmit={canSubmit}>
+    <FollowUpModal title="Feedback PIC Security" subtitle={`Tindak lanjut #${sequence}`} onClose={onClose} actions={actions}>
       {latestUpdate && (
         <div className="p-3 rounded-xl border border-sky-900/50 bg-sky-950/20">
           <p className="text-[9px] font-bold uppercase tracking-widest text-sky-500 mb-1">Update terakhir · {latestUpdate.actorName}</p>
@@ -321,10 +332,15 @@ function ReviewFollowUpModal({ incident, followUp, sequence, securityName, onClo
       {approved !== null && (
         <div>
           <label className={LABEL_CLASS}>
-            {approved ? 'Catatan untuk petugas pelapor' : 'Komentar'} {approved ? <span className="text-cyan-700 normal-case">(opsional)</span> : <span className="text-rose-400">*</span>}
+            {approved ? 'Catatan' : 'Komentar'} {approved ? <span className="text-cyan-700 normal-case">(opsional)</span> : <span className="text-rose-400">*</span>}
           </label>
-          <textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={3} placeholder={approved ? 'Contoh: mohon cek kondisi di lapangan saat patroli berikutnya.' : 'Jelaskan apa yang belum sesuai...'} className={TEXTAREA_CLASS} />
-          {approved && <p className="text-[10px] text-fuchsia-300 mt-2 ml-1">Status akan menjadi Need Verification dan permintaan verifikasi dikirim ke petugas pelapor ({incident.reportedBy || '-'}).</p>}
+          <textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={3} placeholder={approved ? 'Contoh: pekerjaan sudah sesuai instruksi.' : 'Jelaskan apa yang belum sesuai...'} className={TEXTAREA_CLASS} />
+          {approved && (
+            <div className="text-[10px] mt-2 ml-1 space-y-1">
+              <p className="text-emerald-300"><span className="font-bold">Submit</span>: tindak lanjut langsung selesai (Done) tanpa verifikasi.</p>
+              <p className="text-fuchsia-300"><span className="font-bold">Need Verification</span>: permintaan verifikasi dikirim ke petugas pelapor ({incident.reportedBy || '-'}).</p>
+            </div>
+          )}
           {!approved && <p className="text-[10px] text-amber-300 mt-2 ml-1">Status kembali menjadi Need Action untuk ditindaklanjuti ulang.</p>}
         </div>
       )}
@@ -509,7 +525,7 @@ function FollowUpSection({ incident, followUp, sequence, simRole, securityName, 
                     <div key={entry.id}>
                       <p className="text-[10px] font-mono text-cyan-600">{stamp.date} {stamp.time} · <span className="text-cyan-300 font-bold">{entry.actorName}</span></p>
                       <p className={`text-[10px] font-bold uppercase tracking-wider ${verdictClass}`}>
-                        {ENTRY_TITLES[entry.kind]}{entry.verdict === 'approved' ? ' · Sesuai' : entry.verdict === 'rejected' ? ' · Belum sesuai' : ''}
+                        {ENTRY_TITLES[entry.kind]}{entry.verdict === 'approved' ? ' · Sesuai' : entry.verdict === 'rejected' ? ' · Belum sesuai' : ''}{entry.skipVerification ? ' · Selesai tanpa verifikasi' : ''}
                       </p>
                       {entry.comment && <p className="text-xs text-cyan-100 whitespace-pre-wrap mt-0.5">{entry.comment}</p>}
                       {entry.photoUrl && (
@@ -622,11 +638,11 @@ export function FollowUpSectionList({ incident, followUps, simRole, securityName
           sequence={activeAction.sequence}
           securityName={securityName}
           onClose={closeAction}
-          onSubmitted={(approved) => {
+          onSubmitted={({ approved, requestVerification }) => {
             closeAction();
-            onToast(approved
-              ? `Permintaan verifikasi dikirim ke petugas pelapor (${reporterName}). Status: Need Verification.`
-              : 'Feedback terkirim. Status kembali ke Need Action.');
+            if (!approved) onToast('Feedback terkirim. Status kembali ke Need Action.');
+            else if (requestVerification) onToast(`Permintaan verifikasi dikirim ke petugas pelapor (${reporterName}). Status: Need Verification.`);
+            else onToast('Tindak lanjut dikonfirmasi sesuai. Status: Done (tanpa verifikasi).');
           }}
         />
       )}

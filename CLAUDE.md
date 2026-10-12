@@ -50,3 +50,14 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
 ## Build & test
 - `npm install` dulu (container fresh sering belum ada deps; gejala: `vite: not found`).
 - `npm run build` (vite). `npm run test:security` (15 test). Test halaman: 49 test.
+
+## Titik checkpoint main/sub + NFC
+- Definisi titik ada di `ships.customCheckpoints` (model & normalisasi: `src/utils/shipCheckpoints.js`):
+  `type` main/sub, `parentId`, `nfcTagId`, `referencePhotoUrl` (foto kondisi awal, wajib bersama NFC).
+  Admin mengatur di Armada → kapal → tab TITIK (`ShipCheckpointsTab.jsx`).
+- Patroli: TIDAK ada tombol Aman/Temuan untuk titik ber-NFC. `usePatrolNfcScan` scan terus di tab
+  Checkpoint → tag cocok (UID chip atau isi NDEF) → `PatrolNfcChoiceSheet` (foto acuan + Aman/Temuan)
+  → `handleActionClick(id, type, nfcVerification)`; laporan menyimpan `nfcVerification`.
+  Titik tanpa NFC (tambahan shift/belum didaftarkan) bisa dibuka manual (ditandai "Tanpa NFC").
+- NFC native via `@capgo/capacitor-nfc` (`services/native/nfc.js`); browser pakai Web NFC. Setelah ubah
+  plugin jalankan `npx cap sync android` (hapus lagi file generated yang tak di-track).

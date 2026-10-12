@@ -12,8 +12,12 @@ import { getTrustedTimeSnapshot, subscribeTrustedTime } from '../services/time/t
 import { summarizeTimeAudit } from '../services/time/timeAudit';
 import {
   CheckCircle2, AlertTriangle, Search, Ship, MapPin, ExternalLink, ArrowLeft, Plus,
-  CalendarDays, Thermometer, Wind, FileText, CircleOff, TimerReset, Clock,
+  CalendarDays, Thermometer, Wind, FileText, CircleOff, TimerReset, Clock, Nfc, CornerDownRight, ShieldAlert, Settings,
 } from 'lucide-react';
+import PatrolNfcChoiceSheet from '../components/modals/PatrolNfcChoiceSheet';
+import { usePatrolNfcScan } from '../hooks/usePatrolNfcScan';
+import { openNfcSettings } from '../services/native/nfc';
+import { createCheckpointNameKey, normalizeShipCheckpointDefinitions } from '../utils/shipCheckpoints';
 import AsyncImage from '../components/AsyncImage';
 import HistoryDetailView from '../components/views/HistoryDetailView';
 import ShiftStatusModal from '../components/modals/ShiftStatusModal';
@@ -155,8 +159,10 @@ const PatrolPage = React.memo(function PatrolPage() {
     completedCount, totalCount, progressPercentage, newCustomNode, setNewCustomNode,
     checkpoints, activeShiftGuardSnapshot, currentShiftMeta, currentShiftSchedule, canPatrolCurrentShip, canAddTemporaryPatrolNode,
     activeForms, isShiftStatusRequired, isCurrentShiftStatusCompleted, showShiftStatusModal, openShiftStatusModal,
+    pendingPatrolCameraCapture,
   } = usePatrol();
-  const { operationalShip, operationalShipName } = useShips();
+  const { operationalShip, operationalShipName, shipsData } = useShips();
+  const [nfcSelection, setNfcSelection] = React.useState(null);
   const { weatherInfo, weatherLoading, getWeatherDetail } = useWeather();
   const { setPreviewPhoto, selectedReportDetail } = useReports();
   const { selectedHistoryEntry, closeHistoryEntry } = useHistory();
@@ -188,6 +194,53 @@ const PatrolPage = React.memo(function PatrolPage() {
   const visibleCheckpoints = React.useMemo(() => ensureArray(filteredCheckpoints), [filteredCheckpoints]);
   const isCheckpointLocked = !isHistoryMode && isShiftStatusRequired && !isCurrentShiftStatusCompleted;
   const canAddShiftNode = canAddTemporaryPatrolNode && !isCheckpointLocked;
+
+  // Definisi titik kapal (main/sub, NFC, foto acuan) dipetakan ke item patroli lewat nama.
+  const checkpointDefinitions = React.useMemo(
+    () => normalizeShipCheckpointDefinitions(operationalShip?.customCheckpoints),
+    [operationalShip?.customCheckpoints],
+  );
+  const definitionByNameKey = React.useMemo(
+    () => new Map(checkpointDefinitions.map(definition => [createCheckpointNameKey(definition.name), definition])),
+    [checkpointDefinitions],
+  );
+  const definitionById = React.useMemo(
+    () => new Map(checkpointDefinitions.map(definition => [definition.id, definition])),
+    [checkpointDefinitions],
+  );
+  const getDefinitionForItem = React.useCallback((item) => (
+    item?.isTemporaryShiftNode ? null : definitionByNameKey.get(createCheckpointNameKey(item?.name)) || null
+  ), [definitionByNameKey]);
+
+  const isNfcScanActive = !isHistoryMode
+    && patrolTab === 'checkpoint'
+    && canPatrolCurrentShip
+    && !isCheckpointLocked
+    && !hasActiveForm
+    && !pendingPatrolCameraCapture
+    && !nfcSelection;
+  const nfcScan = usePatrolNfcScan({
+    active: isNfcScanActive,
+    ship: operationalShip,
+    ships: shipsData,
+    checkpoints,
+    onCheckpointScanned: ({ item, definition, tagId }) => {
+      setNfcSelection({ item, definition, verified: true, tagId, verifiedAt: new Date(getTrustedTimeSnapshot().nowMs || Date.now()).toISOString() });
+    },
+  });
+
+  const handleNfcChoice = React.useCallback((type) => {
+    const selection = nfcSelection;
+    if (!selection) return;
+    setNfcSelection(null);
+    handleActionClick(selection.item.id, type, selection.verified
+      ? {
+        tagId: selection.tagId,
+        verifiedAt: selection.verifiedAt,
+        referencePhotoUrl: selection.definition?.referencePhotoUrl || null,
+      }
+      : null);
+  }, [handleActionClick, nfcSelection]);
 
   const summaryCards = React.useMemo(() => ([
     { type: 'aman', count: patrolSummary.aman },
@@ -287,6 +340,9 @@ const PatrolPage = React.memo(function PatrolPage() {
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-0.5">
             <p className={`font-bold ${meta.itemTextClass}`}>{item.name}</p>
+            {item.nfcVerification?.tagId && (
+              <span className="inline-flex items-center gap-0.5 text-[9px] uppercase tracking-widest text-emerald-300 border border-emerald-500/40 px-1 py-0.5 rounded" title="Dilaporkan lewat tap NFC"><Nfc className="w-3 h-3" /> NFC</span>
+            )}
             {item.isTemporaryShiftNode && (
               <span className="text-[9px] uppercase tracking-widest text-yellow-300 border border-yellow-500/40 px-1.5 py-0.5 rounded">
                 Tambahan Shift
@@ -452,6 +508,39 @@ const PatrolPage = React.memo(function PatrolPage() {
                   </div>
                 </div>
 
+                {!isCheckpointLocked && canPatrolCurrentShip && nfcScan.support.checked && (
+                  <div className="mb-3 space-y-2">
+                    {!nfcScan.support.supported ? (
+                      <div className="flex items-start gap-2 rounded-xl border border-rose-500/30 bg-rose-950/20 p-3 text-xs text-rose-200">
+                        <Nfc className="w-4 h-4 shrink-0 mt-0.5" />
+                        <p>Perangkat/browser ini tidak bisa membaca NFC. Gunakan aplikasi SmartPatrol di HP Android ber-NFC untuk melaporkan titik.</p>
+                      </div>
+                    ) : !nfcScan.support.enabled ? (
+                      <div className="flex items-center justify-between gap-2 rounded-xl border border-amber-500/30 bg-amber-950/20 p-3 text-xs text-amber-100">
+                        <p className="flex items-center gap-2"><Nfc className="w-4 h-4 shrink-0" /> NFC HP sedang mati.</p>
+                        <button type="button" onClick={openNfcSettings} className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-amber-400/40 bg-amber-500/15 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-widest"><Settings className="w-3.5 h-3.5" /> Nyalakan</button>
+                      </div>
+                    ) : (
+                      <div className={`flex items-center gap-3 rounded-xl border p-3 ${nfcScan.scanState === 'scanning' ? 'border-cyan-500/40 bg-cyan-500/10' : 'border-cyan-900/50 bg-[#0b1229]'}`}>
+                        <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-cyan-500/15 text-cyan-300">
+                          {nfcScan.scanState === 'scanning' && <span className="absolute inset-0 rounded-full bg-cyan-400/20 animate-ping" />}
+                          <Nfc className="w-5 h-5" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-cyan-100">{nfcScan.scanState === 'scanning' ? 'Siap scan NFC' : 'Scan NFC berhenti'}</p>
+                          <p className="text-[11px] text-cyan-400">Tempelkan bagian belakang HP ke tag NFC di titik checkpoint untuk melapor.</p>
+                        </div>
+                      </div>
+                    )}
+                    {nfcScan.notice && (
+                      <div role="alert" className={`flex items-start justify-between gap-2 rounded-xl border p-3 text-xs ${nfcScan.notice.tone === 'warning' ? 'border-amber-500/30 bg-amber-950/20 text-amber-100' : 'border-rose-500/30 bg-rose-950/20 text-rose-100'}`}>
+                        <p>{nfcScan.notice.message}</p>
+                        <button type="button" onClick={nfcScan.clearNotice} className="shrink-0 text-[10px] font-bold uppercase tracking-widest opacity-70 hover:opacity-100">Tutup</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="space-y-3 flex-1">
                   {visibleCheckpoints.length === 0 && (
                     <p className="text-xs text-cyan-700 italic border border-dashed border-cyan-900/50 p-4 rounded-xl text-center">
@@ -461,41 +550,45 @@ const PatrolPage = React.memo(function PatrolPage() {
                   {visibleCheckpoints.map((item) => {
                     if (item.status === 'completed') return renderSummaryListItem(item);
 
+                    const definition = getDefinitionForItem(item);
+                    const hasNfc = Boolean(definition?.nfcTagId);
+                    const parentName = definition?.type === 'sub' ? definitionById.get(definition.parentId)?.name : '';
+                    // Titik ber-NFC hanya bisa dilaporkan lewat tap NFC. Titik tanpa NFC (titik tambahan
+                    // shift / belum didaftarkan admin) tetap bisa dibuka manual agar patroli tidak macet.
+                    const canOpenManually = !hasNfc && !isCheckpointLocked;
+
                     return (
-                      <div key={item.id} className="p-3 bg-[#0b1229] border border-cyan-800/50 rounded-xl transition-all hover:border-cyan-500/30">
+                      <div
+                        key={item.id}
+                        role={canOpenManually ? 'button' : undefined}
+                        tabIndex={canOpenManually ? 0 : undefined}
+                        onClick={canOpenManually ? () => setNfcSelection({ item, definition, verified: false }) : undefined}
+                        onKeyDown={canOpenManually ? (event) => { if (event.key === 'Enter') setNfcSelection({ item, definition, verified: false }); } : undefined}
+                        className={`p-3 bg-[#0b1229] border rounded-xl transition-all ${definition?.type === 'sub' ? 'ml-4 border-sky-900/60' : 'border-cyan-800/50'} ${canOpenManually ? 'cursor-pointer hover:border-amber-500/40' : ''}`}
+                      >
                         <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 flex-1 min-w-0">
-                            <p className="font-bold text-white truncate">{item.name}</p>
-                            {item.isTemporaryShiftNode && (
-                              <span className="shrink-0 text-[9px] uppercase tracking-widest text-yellow-300 border border-yellow-500/40 px-1.5 py-0.5 rounded">
-                                Tambahan Shift
-                              </span>
+                          <div className="flex-1 min-w-0">
+                            {parentName && (
+                              <p className="text-[10px] text-sky-400 flex items-center gap-1 mb-0.5 truncate"><CornerDownRight className="w-3 h-3 shrink-0" /> {parentName}</p>
                             )}
+                            <div className="flex items-center gap-2 min-w-0">
+                              <p className="font-bold text-white truncate">{item.name}</p>
+                              {item.isTemporaryShiftNode && (
+                                <span className="shrink-0 text-[9px] uppercase tracking-widest text-yellow-300 border border-yellow-500/40 px-1.5 py-0.5 rounded">
+                                  Tambahan Shift
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          <div className="flex gap-2 shrink-0">
-                            <button
-                              onClick={() => handleActionClick(item.id, 'aman')}
-                              disabled={isCheckpointLocked}
-                              className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl font-bold text-xs transition-colors shadow-sm ${
-                                isCheckpointLocked
-                                  ? 'cursor-not-allowed border border-slate-800 bg-slate-900 text-slate-500'
-                                  : 'bg-[#070b19] hover:bg-emerald-950/30 border border-emerald-900/50 hover:border-emerald-500/50 text-emerald-100'
-                              }`}
-                            >
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> AMAN
-                            </button>
-                            <button
-                              onClick={() => handleActionClick(item.id, 'temuan')}
-                              disabled={isCheckpointLocked}
-                              className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl font-bold text-xs transition-colors shadow-sm ${
-                                isCheckpointLocked
-                                  ? 'cursor-not-allowed border border-slate-800 bg-slate-900 text-slate-500'
-                                  : 'bg-[#070b19] hover:bg-yellow-950/30 border border-yellow-900/50 hover:border-yellow-500/50 text-yellow-100'
-                              }`}
-                            >
-                              <AlertTriangle className="w-3.5 h-3.5 text-yellow-400" /> TEMUAN
-                            </button>
-                          </div>
+                          {hasNfc ? (
+                            <span className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[10px] font-bold uppercase tracking-wider ${isCheckpointLocked ? 'border-slate-800 text-slate-500' : 'border-cyan-600/50 bg-cyan-500/10 text-cyan-200'}`}>
+                              <Nfc className="w-3.5 h-3.5" /> Tap NFC
+                            </span>
+                          ) : (
+                            <span className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[10px] font-bold uppercase tracking-wider ${isCheckpointLocked ? 'border-slate-800 text-slate-500' : 'border-amber-600/40 text-amber-300'}`}>
+                              <ShieldAlert className="w-3.5 h-3.5" /> Tanpa NFC
+                            </span>
+                          )}
                         </div>
                       </div>
                     );
@@ -550,6 +643,16 @@ const PatrolPage = React.memo(function PatrolPage() {
            </>
          )}
        </div>
+
+       {nfcSelection && (
+         <PatrolNfcChoiceSheet
+           selection={nfcSelection}
+           parentName={nfcSelection.definition?.type === 'sub' ? definitionById.get(nfcSelection.definition.parentId)?.name : ''}
+           onChoose={handleNfcChoice}
+           onClose={() => setNfcSelection(null)}
+           onPreviewPhoto={(url) => setPreviewPhoto({ url, author: `Foto acuan · ${nfcSelection.item.name}` })}
+         />
+       )}
 
        {/* Right Pane: Detail Component */}
         <div className="hidden lg:block flex-1 border-l border-cyan-900/50 bg-[#070b19] shrink-0 overflow-hidden relative">

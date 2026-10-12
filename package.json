@@ -27,6 +27,7 @@
     "@capacitor/core": "^8.3.1",
     "@capacitor/geolocation": "^8.2.0",
     "@capacitor/network": "^8.0.1",
+    "@capgo/capacitor-nfc": "8.2.10",
     "@supabase/supabase-js": "^2.86.0",
     "firebase": "^10.14.1",
     "jspdf": "^4.2.1",

@@ -7986,7 +7986,9 @@ export function AppProvider({ children }) {
   }, [activeShiftGuardSnapshot, currentShiftMeta.key, currentUser, currentUserRecord, operationalShip?.id, operationalShipName, requestCloudSync, showTrustedTimeGateDialog]);
 
   // Patrol handlers
-  const handleActionClick = useCallback(async (id, type) => {
+  // nfcVerification: bukti tap NFC di titik ({ tagId, verifiedAt, referencePhotoUrl }) — dibawa
+  // sampai laporan tersubmit agar riwayat menunjukkan petugas benar-benar hadir di titik.
+  const handleActionClick = useCallback(async (id, type, nfcVerification = null) => {
     if (!canPatrolCurrentShip) return;
     if (showTrustedTimeGateDialog()) return;
     if (!isCurrentShiftStatusCompleted) {
@@ -7994,7 +7996,7 @@ export function AppProvider({ children }) {
       return;
     }
 
-    setPendingPatrolCameraCapture({ id, type });
+    setPendingPatrolCameraCapture({ id, type, nfcVerification });
   }, [canPatrolCurrentShip, isCurrentShiftStatusCompleted, showTrustedTimeGateDialog]);
   const handleFormChange = useCallback((id, field, value) => { setActiveForms(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } })); }, []);
   const handlePhotoUpload = useCallback(async (id, isIncident = false, options = {}) => {
@@ -8077,6 +8079,12 @@ export function AppProvider({ children }) {
         penyebab: sanitizeMultilineText(formState.penyebab, 240),
         kejadian: sanitizeMultilineText(formState.kejadian, 280),
         tindakLanjut: sanitizeMultilineText(formState.tindakLanjut, 240),
+        nfcVerification: formState.nfcVerification?.tagId
+          ? {
+            tagId: sanitizeText(formState.nfcVerification.tagId, 64),
+            verifiedAt: sanitizeText(formState.nfcVerification.verifiedAt || '', 40) || null,
+          }
+          : null,
         ...trustedTimestamp,
       };
       updateOperationalShipCheckpoints(shipCheckpoints => shipCheckpoints.map((checkpoint) => (
@@ -8264,15 +8272,17 @@ export function AppProvider({ children }) {
     if (captureRequest.intent === 'incident-progress') {
       setNewProgress((previousProgress) => ({ ...previousProgress, ...previewSet }));
     } else {
-      setActiveForms({
+      // Ambil ulang foto (handlePhotoUpload) tidak membawa nfcVerification → pertahankan yang lama.
+      setActiveForms((previousForms) => ({
         [captureRequest.id]: {
           type: captureRequest.type,
           penyebab: '',
           kejadian: '',
           tindakLanjut: '',
           ...previewSet,
+          nfcVerification: captureRequest.nfcVerification || previousForms?.[captureRequest.id]?.nfcVerification || null,
         },
-      });
+      }));
     }
     setPendingPatrolCameraCapture(null);
 

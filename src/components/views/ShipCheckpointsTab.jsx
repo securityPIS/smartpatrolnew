@@ -13,9 +13,9 @@ import {
 import { useReports, useShips } from '../../context/AppContextRuntime';
 import AsyncImage from '../AsyncImage';
 import {
-  CHECKPOINT_TYPE_MAIN, CHECKPOINT_TYPE_SUB, getCheckpointCompleteness, groupCheckpointHierarchy, sanitizeNfcTagId,
+  CHECKPOINT_TYPE_MAIN, CHECKPOINT_TYPE_SUB, getCheckpointCompleteness, getRegistrableNfcTagId, groupCheckpointHierarchy, sanitizeNfcTagId,
 } from '../../utils/shipCheckpoints';
-import { isNfcScanSupported, startNfcTagScan } from '../../services/native/nfc';
+import { getNfcSupport, openNfcSettings, startNfcTagScan } from '../../services/native/nfc';
 
 const inputClass = 'w-full bg-[#070b19] border border-cyan-800/50 rounded-lg p-2.5 text-sm focus:border-cyan-400 outline-none text-white placeholder:text-cyan-800';
 
@@ -88,12 +88,21 @@ function CheckpointEditor({ editor, parentName, onCancel, onSaved }) {
     referencePhotoUrl: editor.checkpoint?.referencePhotoUrl || null,
   }));
   const [error, setError] = useState('');
-  const [nfcState, setNfcState] = useState({ scanning: false, message: '' });
+  const [nfcState, setNfcState] = useState({ scanning: false, message: '', contents: [] });
   const [isPickingPhoto, setIsPickingPhoto] = useState(false);
   const stopScanRef = useRef(null);
-  const nfcSupported = useMemo(() => isNfcScanSupported(), []);
+  const [nfcSupport, setNfcSupport] = useState({ supported: false, enabled: false, checked: false });
 
-  useEffect(() => () => stopScanRef.current?.(), []);
+  useEffect(() => {
+    let cancelled = false;
+    getNfcSupport().then((support) => {
+      if (!cancelled) setNfcSupport({ ...support, checked: true });
+    });
+    return () => {
+      cancelled = true;
+      stopScanRef.current?.();
+    };
+  }, []);
 
   const update = (patch) => {
     setDraft(previous => ({ ...previous, ...patch }));
@@ -103,16 +112,21 @@ function CheckpointEditor({ editor, parentName, onCancel, onSaved }) {
   const handleScan = () => {
     if (nfcState.scanning) {
       stopScanRef.current?.();
-      setNfcState({ scanning: false, message: '' });
+      setNfcState({ scanning: false, message: '', contents: [] });
       return;
     }
-    setNfcState({ scanning: true, message: 'Tempelkan tag NFC ke bagian belakang HP…' });
+    setNfcState({ scanning: true, message: 'Tempelkan tag NFC ke bagian belakang HP…', contents: [] });
     stopScanRef.current = startNfcTagScan({
-      onTag: (serialNumber) => {
-        update({ nfcTagId: sanitizeNfcTagId(serialNumber) });
-        setNfcState({ scanning: false, message: 'Tag terbaca.' });
+      onTag: (tag) => {
+        const tagId = getRegistrableNfcTagId(tag);
+        update({ nfcTagId: tagId });
+        setNfcState({
+          scanning: false,
+          message: tag.uid ? 'Tag terbaca (UID chip).' : 'Tag terbaca (isi tag).',
+          contents: tag.contents,
+        });
       },
-      onError: (scanError) => setNfcState({ scanning: false, message: scanError.message }),
+      onError: (scanError) => setNfcState({ scanning: false, message: scanError.message, contents: [] }),
     });
   };
 
@@ -173,15 +187,21 @@ function CheckpointEditor({ editor, parentName, onCancel, onSaved }) {
         <p className="text-[10px] font-bold text-cyan-500 uppercase tracking-widest flex items-center gap-1"><Nfc className="w-3.5 h-3.5" /> Tag NFC <span className="text-rose-400">*</span></p>
         <div className="flex gap-2">
           <input type="text" value={draft.nfcTagId} onChange={e => update({ nfcTagId: e.target.value })} onBlur={() => update({ nfcTagId: sanitizeNfcTagId(draft.nfcTagId) })} placeholder="UID tag, mis. 04:A2:3B:1C:5D:80" className={`${inputClass} font-mono flex-1 min-w-0`} />
-          {nfcSupported && (
+          {nfcSupport.supported && (
             <button type="button" onClick={handleScan} className={`shrink-0 px-3 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 border transition-colors ${nfcState.scanning ? 'bg-amber-500/20 text-amber-200 border-amber-500/50' : 'bg-cyan-600/20 text-cyan-200 border-cyan-500/50 hover:bg-cyan-600/40'}`}>
               {nfcState.scanning ? <><Loader2 className="w-4 h-4 animate-spin" /> Batal</> : <><ScanLine className="w-4 h-4" /> Scan</>}
             </button>
           )}
         </div>
         {nfcState.message && <p className={`text-[11px] ${nfcState.scanning ? 'text-amber-300' : 'text-cyan-400'}`}>{nfcState.message}</p>}
-        {!nfcSupported && (
-          <p className="text-[11px] text-cyan-600">Scan NFC langsung belum didukung di perangkat/browser ini. Ketik UID tag (bisa dibaca dengan aplikasi NFC reader).</p>
+        {nfcState.contents.length > 0 && (
+          <p className="text-[11px] text-cyan-300 break-all">Isi tag: <span className="font-mono">{nfcState.contents.join(' · ')}</span></p>
+        )}
+        {nfcSupport.checked && nfcSupport.supported && !nfcSupport.enabled && (
+          <button type="button" onClick={openNfcSettings} className="text-[11px] text-amber-300 underline">NFC HP sedang mati — buka pengaturan NFC</button>
+        )}
+        {nfcSupport.checked && !nfcSupport.supported && (
+          <p className="text-[11px] text-cyan-600">Scan NFC tidak tersedia di perangkat/browser ini. Ketik UID atau isi tag secara manual, atau gunakan aplikasi SmartPatrol Android.</p>
         )}
       </div>
 

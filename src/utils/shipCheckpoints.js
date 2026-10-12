@@ -159,3 +159,32 @@ export function findNfcTagOwner(ships = [], nfcTagId, { excludeShipId = null, ex
   }
   return null;
 }
+
+// Kunci identitas tag hasil scan: UID chip + isi NDEF (teks/URI). Titik cocok bila nfcTagId
+// terdaftar sama dengan salah satunya — jadi admin bebas mendaftarkan UID atau isi tag.
+export function getScannedNfcKeys(tag) {
+  const keys = [tag?.uid, ...(Array.isArray(tag?.contents) ? tag.contents : [])]
+    .map(sanitizeNfcTagId)
+    .filter(Boolean);
+  return Array.from(new Set(keys));
+}
+
+// Nilai yang disimpan saat admin mendaftarkan tag: UID bila ada (unik per chip), selain itu isi tag.
+export function getRegistrableNfcTagId(tag) {
+  return sanitizeNfcTagId(tag?.uid) || sanitizeNfcTagId(tag?.contents?.[0]);
+}
+
+export function findCheckpointByNfcTag(checkpoints = [], tag) {
+  const keys = new Set(getScannedNfcKeys(tag));
+  if (keys.size === 0) return null;
+  return (Array.isArray(checkpoints) ? checkpoints : [])
+    .find(checkpoint => keys.has(sanitizeNfcTagId(checkpoint?.nfcTagId))) || null;
+}
+
+export function findShipCheckpointByNfcTag(ships = [], tag) {
+  for (const ship of Array.isArray(ships) ? ships : []) {
+    const checkpoint = findCheckpointByNfcTag(ship?.customCheckpoints, tag);
+    if (checkpoint) return { ship, checkpoint };
+  }
+  return null;
+}

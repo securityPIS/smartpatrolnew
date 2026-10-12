@@ -1,7 +1,7 @@
 import React from 'react';
 import { usePatrol } from '../../context/AppContextRuntime';
 import { getTrustedTimeSnapshot, subscribeTrustedTime } from '../../services/time/trustedTime';
-import { X, Camera, Send, Lock, AlertCircle } from 'lucide-react';
+import { X, Camera, Send, Lock, AlertCircle, Nfc } from 'lucide-react';
 import AsyncImage from '../AsyncImage';
 import { isReportFieldValid, REPORT_FIELD_MIN_LENGTH } from '../../utils/sanitize';
 
@@ -101,6 +101,19 @@ export default function PatrolFormView({ isInline = false }) {
       </div>
 
       <div className="p-5 overflow-y-auto flex-1 space-y-4">
+        {activePatrolState.nfcVerification?.tagId && (
+          <div className="flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-2.5">
+            {activePatrolState.nfcVerification.referencePhotoUrl && (
+              <div className="w-16 h-12 shrink-0 rounded-lg overflow-hidden border border-cyan-800">
+                <AsyncImage src={activePatrolState.nfcVerification.referencePhotoUrl} alt="Foto acuan" className="w-full h-full object-cover" />
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="text-[10px] font-black uppercase tracking-widest text-emerald-300 flex items-center gap-1"><Nfc className="w-3.5 h-3.5" /> NFC terverifikasi</p>
+              <p className="text-[11px] text-cyan-400">{activePatrolState.nfcVerification.referencePhotoUrl ? 'Ambil foto dari sudut yang sama dengan foto acuan.' : 'Kehadiran di titik tercatat.'}</p>
+            </div>
+          </div>
+        )}
         {activePatrolState.type === 'temuan' ? (
           <>
             <div className="bg-[#070b19] border border-yellow-500/20 rounded-xl px-4 py-3 flex items-center justify-between gap-3">

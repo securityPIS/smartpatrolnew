@@ -80,3 +80,30 @@ test('satu tag NFC tidak boleh dipakai dua titik di seluruh armada', () => {
   assert.equal(findNfcTagOwner(ships, '04aa', { excludeShipId: 'a', excludeCheckpointId: 'cp1' }), null);
   assert.equal(findNfcTagOwner(ships, '04bb'), null);
 });
+
+test('tag hasil scan cocok lewat UID chip maupun isi tag', async () => {
+  const { findCheckpointByNfcTag, findShipCheckpointByNfcTag, getRegistrableNfcTagId } = await import('../../src/utils/shipCheckpoints.js');
+  const checkpoints = [
+    { id: 'a', name: 'Dek', nfcTagId: '04:A2:3B' },
+    { id: 'b', name: 'Pompa', nfcTagId: 'CP-PMP-01' },
+  ];
+  assert.equal(findCheckpointByNfcTag(checkpoints, { uid: '04:a2:3b', contents: [] })?.id, 'a');
+  assert.equal(findCheckpointByNfcTag(checkpoints, { uid: '04:FF:FF', contents: ['cp-pmp-01'] })?.id, 'b');
+  assert.equal(findCheckpointByNfcTag(checkpoints, { uid: '04:FF:FF', contents: [] }), null);
+  assert.equal(getRegistrableNfcTagId({ uid: '04a23b', contents: ['CP-1'] }), '04:A2:3B');
+  assert.equal(getRegistrableNfcTagId({ uid: '', contents: ['CP-1'] }), 'CP-1');
+  const owner = findShipCheckpointByNfcTag([{ id: 's1', name: 'KM A', customCheckpoints: checkpoints }], { uid: '04A23B', contents: [] });
+  assert.equal(owner?.ship.id, 's1');
+  assert.equal(owner?.checkpoint.id, 'a');
+});
+
+test('isi NDEF teks & URI dari plugin native terdekode', async () => {
+  const { decodeNdefRecord } = await import('../../src/services/native/nfc.js');
+  const bytes = (text) => Array.from(new TextEncoder().encode(text));
+  // Text record: status (panjang kode bahasa = 2) + "en" + teks
+  assert.equal(decodeNdefRecord({ tnf: 1, type: bytes('T'), payload: [2, ...bytes('en'), ...bytes('CP-PMP-01')] }), 'CP-PMP-01');
+  // URI record dengan prefix 0x04 = "https://"
+  assert.equal(decodeNdefRecord({ tnf: 1, type: bytes('U'), payload: [4, ...bytes('smartpatrol.app/cp/1')] }), 'https://smartpatrol.app/cp/1');
+  assert.equal(decodeNdefRecord({ tnf: 2, type: bytes('text/plain'), payload: bytes('RUANG-MESIN') }), 'RUANG-MESIN');
+  assert.equal(decodeNdefRecord({ tnf: 4, type: bytes('x'), payload: [1, 2] }), '');
+});

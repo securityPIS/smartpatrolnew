@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useReports, useShips } from '../../context/AppContextRuntime';
 import AsyncImage from '../AsyncImage';
+import CheckpointGroupToggle, { useCollapsedGroups } from '../CheckpointGroupToggle';
 import {
   CHECKPOINT_TYPE_MAIN, CHECKPOINT_TYPE_SUB, getCheckpointCompleteness, getRegistrableNfcTagId, groupCheckpointHierarchy, sanitizeNfcTagId,
 } from '../../utils/shipCheckpoints';
@@ -246,8 +247,13 @@ export default function ShipCheckpointsTab({ ship }) {
   const { setPreviewPhoto } = useReports();
   const [editor, setEditor] = useState(null);
   const editorRef = useRef(null);
+  const collapse = useCollapsedGroups();
 
   const groups = useMemo(() => groupCheckpointHierarchy(ship?.customCheckpoints), [ship?.customCheckpoints]);
+  const groupsWithSubIds = useMemo(
+    () => groups.filter(group => group.subs.length > 0).map(group => group.main.id),
+    [groups],
+  );
   const stats = useMemo(() => {
     const all = groups.flatMap(group => [group.main, ...group.subs]);
     return {
@@ -268,7 +274,10 @@ export default function ShipCheckpointsTab({ ship }) {
 
   const rowHandlers = {
     onEdit: (checkpoint) => openEditor({ checkpoint, type: checkpoint.type, parentId: checkpoint.parentId }),
-    onAddSub: (main) => openEditor({ checkpoint: null, type: CHECKPOINT_TYPE_SUB, parentId: main.id }),
+    onAddSub: (main) => {
+      collapse.expand(main.id);
+      openEditor({ checkpoint: null, type: CHECKPOINT_TYPE_SUB, parentId: main.id });
+    },
     onDelete: (checkpoint) => deleteShipCheckpointDefinition(checkpoint.id),
     onPreview: (checkpoint) => setPreviewPhoto({
       url: checkpoint.referencePhotoUrl,
@@ -286,9 +295,18 @@ export default function ShipCheckpointsTab({ ship }) {
           <div>
             <h3 className="text-sm font-black text-cyan-100 uppercase tracking-widest flex items-center gap-2"><ShieldAlert className="w-4 h-4 text-cyan-400" /> Titik Checkpoint</h3>
             <p className="text-[11px] text-cyan-500 mt-1 font-mono">{stats.mainCount} main · {stats.subCount} sub</p>
+            {groupsWithSubIds.length > 0 && (
+              <button
+                type="button"
+                onClick={() => collapse.setAll(groupsWithSubIds, collapse.collapsedCount === 0)}
+                className="mt-1.5 text-sky-300 hover:text-sky-200"
+              >
+                <span className="text-[10px] font-bold uppercase tracking-widest">{collapse.collapsedCount === 0 ? 'Tutup semua sub' : 'Buka semua sub'}</span>
+              </button>
+            )}
           </div>
-          <button type="button" onClick={() => openEditor({ checkpoint: null, type: CHECKPOINT_TYPE_MAIN, parentId: '' })} className="shrink-0 px-3 py-1.5 bg-cyan-600/20 text-cyan-300 border border-cyan-500/50 text-xs font-bold rounded-lg flex items-center gap-1 hover:bg-cyan-600/40 transition-colors">
-            <PlusCircle className="w-3.5 h-3.5" /> Main Checkpoint
+          <button type="button" onClick={() => openEditor({ checkpoint: null, type: CHECKPOINT_TYPE_MAIN, parentId: '' })} className="shrink-0 px-3 py-1.5 bg-cyan-600/20 text-cyan-300 border border-cyan-500/50 rounded-lg flex items-center gap-1 hover:bg-cyan-600/40 transition-colors">
+            <PlusCircle className="w-3.5 h-3.5" /> <span className="text-xs font-bold">Main Checkpoint</span>
           </button>
         </div>
         {stats.incompleteCount > 0 ? (
@@ -324,13 +342,30 @@ export default function ShipCheckpointsTab({ ship }) {
             return (
               <div key={group.main.id} className="bg-[#0b1229] p-2 rounded-2xl border border-cyan-800/50 space-y-2">
                 <CheckpointRow checkpoint={group.main} code={mainCode} subCount={group.subs.length} {...rowHandlers} />
-                {group.subs.length > 0 && (
-                  <div className="ml-4 pl-3 border-l-2 border-sky-800/60 space-y-2">
-                    {group.subs.map((sub, subIndex) => (
-                      <CheckpointRow key={sub.id} checkpoint={sub} code={`SUB-${groupIndex + 1}.${subIndex + 1}`} isSub {...rowHandlers} />
-                    ))}
-                  </div>
-                )}
+                {group.subs.length > 0 && (() => {
+                  const expanded = collapse.isExpanded(group.main.id);
+                  const incompleteSubs = group.subs.filter(sub => !getCheckpointCompleteness(sub).complete).length;
+                  const listId = `cp-subs-${group.main.id}`;
+                  return (
+                    <>
+                      <CheckpointGroupToggle
+                        expanded={expanded}
+                        onToggle={() => collapse.toggle(group.main.id)}
+                        subCount={group.subs.length}
+                        controlsId={listId}
+                        summary={incompleteSubs > 0 ? `${incompleteSubs} belum lengkap` : 'Lengkap'}
+                        summaryTone={incompleteSubs > 0 ? 'warning' : 'good'}
+                      />
+                      {expanded && (
+                        <div id={listId} className="ml-4 pl-3 border-l-2 border-sky-800/60 space-y-2">
+                          {group.subs.map((sub, subIndex) => (
+                            <CheckpointRow key={sub.id} checkpoint={sub} code={`SUB-${groupIndex + 1}.${subIndex + 1}`} isSub {...rowHandlers} />
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             );
           })}

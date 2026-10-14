@@ -13,7 +13,9 @@ import { summarizeTimeAudit } from '../services/time/timeAudit';
 import {
   CheckCircle2, AlertTriangle, Search, Ship, MapPin, ExternalLink, ArrowLeft, Plus,
   CalendarDays, Thermometer, Wind, FileText, CircleOff, TimerReset, Clock, Nfc, CornerDownRight, ShieldAlert, Settings,
+  ImageIcon,
 } from 'lucide-react';
+import CheckpointGroupToggle, { useCollapsedGroups } from '../components/CheckpointGroupToggle';
 import PatrolNfcChoiceSheet from '../components/modals/PatrolNfcChoiceSheet';
 import { usePatrolNfcScan } from '../hooks/usePatrolNfcScan';
 import { openNfcSettings } from '../services/native/nfc';
@@ -242,6 +244,78 @@ const PatrolPage = React.memo(function PatrolPage() {
       : null);
   }, [handleActionClick, nfcSelection]);
 
+  // Kelompokkan item patroli: main diikuti sub-nya (urutan definisi sudah main → sub). Sub yang
+  // induknya tidak ikut tampil (mis. tersaring pencarian) dirender sendiri dengan label induk.
+  const patrolCollapse = useCollapsedGroups();
+  const checkpointGroups = React.useMemo(() => {
+    const groups = [];
+    const groupByMainId = new Map();
+    visibleCheckpoints.forEach((item) => {
+      const definition = getDefinitionForItem(item);
+      const parentGroup = definition?.type === 'sub' ? groupByMainId.get(definition.parentId) : null;
+      if (parentGroup) {
+        parentGroup.subs.push(item);
+        return;
+      }
+      const group = { item, definition, subs: [] };
+      groups.push(group);
+      if (definition?.type === 'main') groupByMainId.set(definition.id, group);
+    });
+    return groups;
+  }, [getDefinitionForItem, visibleCheckpoints]);
+
+  const renderPatrolListItem = (item, { standalone = false } = {}) => {
+    const definition = getDefinitionForItem(item);
+    const referencePhotoUrl = definition?.referencePhotoUrl || null;
+    if (item.status === 'completed') return renderSummaryListItem(item, { referencePhotoUrl });
+
+    const hasNfc = Boolean(definition?.nfcTagId);
+    // Label induk hanya untuk sub yang tampil di luar kelompok main-nya.
+    const parentName = standalone && definition?.type === 'sub' ? definitionById.get(definition.parentId)?.name : '';
+    // Titik ber-NFC hanya bisa dilaporkan lewat tap NFC. Titik tanpa NFC (titik tambahan
+    // shift / belum didaftarkan admin) tetap bisa dibuka manual agar patroli tidak macet.
+    const canOpenManually = !hasNfc && !isCheckpointLocked;
+
+    return (
+      <div
+        key={item.id}
+        role={canOpenManually ? 'button' : undefined}
+        tabIndex={canOpenManually ? 0 : undefined}
+        onClick={canOpenManually ? () => setNfcSelection({ item, definition, verified: false }) : undefined}
+        onKeyDown={canOpenManually ? (event) => { if (event.key === 'Enter') setNfcSelection({ item, definition, verified: false }); } : undefined}
+        className={`p-3 bg-[#0b1229] border rounded-xl transition-all ${definition?.type === 'sub' ? 'border-sky-900/60' : 'border-cyan-800/50'} ${canOpenManually ? 'cursor-pointer hover:border-amber-500/40' : ''}`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            {parentName && (
+              <p className="text-[10px] text-sky-400 flex items-center gap-1 mb-0.5 truncate"><CornerDownRight className="w-3 h-3 shrink-0" /> {parentName}</p>
+            )}
+            <div className="flex items-center gap-2 min-w-0">
+              <p className="font-bold text-white truncate">{item.name}</p>
+              {item.isTemporaryShiftNode && (
+                <span className="shrink-0 text-[9px] uppercase tracking-widest text-yellow-300 border border-yellow-500/40 px-1.5 py-0.5 rounded">
+                  Tambahan Shift
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {renderReferencePhotoButton(item, referencePhotoUrl)}
+            {hasNfc ? (
+              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[10px] font-bold uppercase tracking-wider ${isCheckpointLocked ? 'border-slate-800 text-slate-500' : 'border-cyan-600/50 bg-cyan-500/10 text-cyan-200'}`}>
+                <Nfc className="w-3.5 h-3.5" /> Tap NFC
+              </span>
+            ) : (
+              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[10px] font-bold uppercase tracking-wider ${isCheckpointLocked ? 'border-slate-800 text-slate-500' : 'border-amber-600/40 text-amber-300'}`}>
+                <ShieldAlert className="w-3.5 h-3.5" /> Tanpa NFC
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const summaryCards = React.useMemo(() => ([
     { type: 'aman', count: patrolSummary.aman },
     { type: 'temuan', count: patrolSummary.temuan },
@@ -323,7 +397,29 @@ const PatrolPage = React.memo(function PatrolPage() {
     setPatrolTab('info');
   }, [setPatrolTab]);
 
-  const renderSummaryListItem = React.useCallback((item) => {
+  const openReferencePhoto = React.useCallback((item, referencePhotoUrl) => {
+    if (!referencePhotoUrl) return;
+    setPreviewPhoto({ url: referencePhotoUrl, author: `Kondisi awal · ${item.name}` });
+  }, [setPreviewPhoto]);
+
+  const renderReferencePhotoButton = React.useCallback((item, referencePhotoUrl) => (
+    referencePhotoUrl ? (
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          openReferencePhoto(item, referencePhotoUrl);
+        }}
+        className="shrink-0 p-2 rounded-xl border border-cyan-800/70 bg-[#070b19] text-cyan-300 hover:border-cyan-500/60 hover:text-cyan-100 transition-colors"
+        aria-label={`Lihat foto kondisi awal ${item.name}`}
+        title="Foto kondisi awal"
+      >
+        <ImageIcon className="w-4 h-4" />
+      </button>
+    ) : null
+  ), [openReferencePhoto]);
+
+  const renderSummaryListItem = React.useCallback((item, options = {}) => {
     const isTemuan = item.resultType === 'temuan';
     const isMissed = item.status === 'missed' || item.resultType === 'missed';
     const meta = getSummaryCardMeta(isMissed ? 'missed' : isTemuan ? 'temuan' : 'aman');
@@ -356,6 +452,9 @@ const PatrolPage = React.memo(function PatrolPage() {
             </span>
           </div>
         </div>
+        {options.referencePhotoUrl && (
+          <div className="mr-2">{renderReferencePhotoButton(item, options.referencePhotoUrl)}</div>
+        )}
         <div
           onClick={(event) => {
             if (!item.photoUrl) return;
@@ -374,7 +473,7 @@ const PatrolPage = React.memo(function PatrolPage() {
         </div>
       </div>
     );
-  }, [displayShiftTime, handleOpenPatrolResult, setPreviewPhoto]);
+  }, [displayShiftTime, handleOpenPatrolResult, renderReferencePhotoButton, setPreviewPhoto]);
 
   const renderInfoContent = () => (
     <HistoryDetailView
@@ -436,7 +535,7 @@ const PatrolPage = React.memo(function PatrolPage() {
                   Belum ada data {getSummaryCardMeta(summaryDetailType).emptyLabel} untuk patroli ini.
                 </p>
               )}
-              {summaryDetailItems.map(renderSummaryListItem)}
+              {summaryDetailItems.map(item => renderSummaryListItem(item))}
             </div>
           </div>
         ) : (
@@ -547,49 +646,28 @@ const PatrolPage = React.memo(function PatrolPage() {
                       {searchQuery ? `Titik patroli "${searchQuery}" tidak ditemukan.` : 'Belum ada titik patroli yang tersedia.'}
                     </p>
                   )}
-                  {visibleCheckpoints.map((item) => {
-                    if (item.status === 'completed') return renderSummaryListItem(item);
-
-                    const definition = getDefinitionForItem(item);
-                    const hasNfc = Boolean(definition?.nfcTagId);
-                    const parentName = definition?.type === 'sub' ? definitionById.get(definition.parentId)?.name : '';
-                    // Titik ber-NFC hanya bisa dilaporkan lewat tap NFC. Titik tanpa NFC (titik tambahan
-                    // shift / belum didaftarkan admin) tetap bisa dibuka manual agar patroli tidak macet.
-                    const canOpenManually = !hasNfc && !isCheckpointLocked;
-
+                  {checkpointGroups.map((group) => {
+                    if (group.subs.length === 0) return renderPatrolListItem(group.item, { standalone: true });
+                    const mainId = group.definition.id;
+                    const expanded = Boolean(searchQuery) || patrolCollapse.isExpanded(mainId);
+                    const doneSubs = group.subs.filter(sub => sub.status === 'completed').length;
+                    const listId = `patrol-subs-${mainId}`;
                     return (
-                      <div
-                        key={item.id}
-                        role={canOpenManually ? 'button' : undefined}
-                        tabIndex={canOpenManually ? 0 : undefined}
-                        onClick={canOpenManually ? () => setNfcSelection({ item, definition, verified: false }) : undefined}
-                        onKeyDown={canOpenManually ? (event) => { if (event.key === 'Enter') setNfcSelection({ item, definition, verified: false }); } : undefined}
-                        className={`p-3 bg-[#0b1229] border rounded-xl transition-all ${definition?.type === 'sub' ? 'ml-4 border-sky-900/60' : 'border-cyan-800/50'} ${canOpenManually ? 'cursor-pointer hover:border-amber-500/40' : ''}`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            {parentName && (
-                              <p className="text-[10px] text-sky-400 flex items-center gap-1 mb-0.5 truncate"><CornerDownRight className="w-3 h-3 shrink-0" /> {parentName}</p>
-                            )}
-                            <div className="flex items-center gap-2 min-w-0">
-                              <p className="font-bold text-white truncate">{item.name}</p>
-                              {item.isTemporaryShiftNode && (
-                                <span className="shrink-0 text-[9px] uppercase tracking-widest text-yellow-300 border border-yellow-500/40 px-1.5 py-0.5 rounded">
-                                  Tambahan Shift
-                                </span>
-                              )}
-                            </div>
+                      <div key={group.item.id} className="p-2 rounded-2xl border border-cyan-900/60 bg-[#0b1229]/40 space-y-2">
+                        {renderPatrolListItem(group.item)}
+                        <CheckpointGroupToggle
+                          expanded={expanded}
+                          onToggle={() => patrolCollapse.toggle(mainId)}
+                          subCount={group.subs.length}
+                          controlsId={listId}
+                          summary={`${doneSubs}/${group.subs.length} selesai`}
+                          summaryTone={doneSubs === group.subs.length ? 'good' : 'muted'}
+                        />
+                        {expanded && (
+                          <div id={listId} className="ml-3 pl-3 border-l-2 border-sky-800/60 space-y-2">
+                            {group.subs.map(sub => renderPatrolListItem(sub))}
                           </div>
-                          {hasNfc ? (
-                            <span className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[10px] font-bold uppercase tracking-wider ${isCheckpointLocked ? 'border-slate-800 text-slate-500' : 'border-cyan-600/50 bg-cyan-500/10 text-cyan-200'}`}>
-                              <Nfc className="w-3.5 h-3.5" /> Tap NFC
-                            </span>
-                          ) : (
-                            <span className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[10px] font-bold uppercase tracking-wider ${isCheckpointLocked ? 'border-slate-800 text-slate-500' : 'border-amber-600/40 text-amber-300'}`}>
-                              <ShieldAlert className="w-3.5 h-3.5" /> Tanpa NFC
-                            </span>
-                          )}
-                        </div>
+                        )}
                       </div>
                     );
                   })}

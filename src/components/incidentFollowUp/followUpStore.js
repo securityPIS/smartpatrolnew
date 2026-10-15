@@ -1,27 +1,29 @@
 /*
 Tujuan: Store dummy (in-memory, tanpa database) untuk alur tindak lanjut temuan: assign PIC fungsi,
-        update PIC fungsi, feedback PIC Security, dan verifikasi petugas pelapor.
+        update PIC fungsi, feedback/approve PIC Security, lalu SATU kali verifikasi petugas pelapor
+        untuk seluruh temuan setelah semua tindak lanjut di-approve.
 Caller: Komponen di folder incidentFollowUp dan IncidentDetailView.
 Dependensi: React useSyncExternalStore, followUpPdf (nama file dokumen).
-Main Functions: useIncidentFollowUps, assignFollowUp, submitFollowUpUpdate, submitSecurityReview,
-                submitReporterVerification, seedDemoFollowUps.
+Main Functions: useIncidentFollowUps, useIncidentVerification, getIncidentVerificationState,
+                assignFollowUp, submitFollowUpUpdate, submitSecurityReview, returnFollowUpToPic,
+                submitIncidentVerification, requestReverification, seedDemoFollowUps.
 Side Effects: Hanya state modul di memori; hilang saat aplikasi di-restart (sengaja, versi tampilan).
 */
 
 import { useSyncExternalStore } from 'react';
-import { buildFollowUpPdfFileName } from './followUpPdf';
+import { buildFollowUpPdfFileName } from './followUpPdf.js';
 
 export const FOLLOW_UP_STATUS = {
   NEED_ACTION: 'need_action',
   NEED_REVIEW: 'need_review',
-  NEED_VERIFICATION: 'need_verification',
+  APPROVED: 'approved',
   DONE: 'done',
 };
 
 export const FOLLOW_UP_STATUS_META = {
   [FOLLOW_UP_STATUS.NEED_ACTION]: { label: 'Need Action', badgeClass: 'bg-amber-500/10 border-amber-500/60 text-amber-300' },
   [FOLLOW_UP_STATUS.NEED_REVIEW]: { label: 'Need Review', badgeClass: 'bg-sky-500/10 border-sky-500/60 text-sky-300' },
-  [FOLLOW_UP_STATUS.NEED_VERIFICATION]: { label: 'Need Verification', badgeClass: 'bg-fuchsia-500/10 border-fuchsia-500/60 text-fuchsia-300' },
+  [FOLLOW_UP_STATUS.APPROVED]: { label: 'Approved', badgeClass: 'bg-teal-500/10 border-teal-500/60 text-teal-300' },
   [FOLLOW_UP_STATUS.DONE]: { label: 'Done', badgeClass: 'bg-emerald-500/10 border-emerald-500/60 text-emerald-300' },
 };
 
@@ -48,6 +50,8 @@ export function getAssigneeMeta(assigneeId, securityName = 'PIC Security') {
 
 const followUpsByIncident = new Map();
 const closuresByIncident = new Map();
+// Verifikasi tingkat temuan: { entries: [...], awaitingSecurityDecision: bool }.
+const verificationsByIncident = new Map();
 const listeners = new Set();
 const EMPTY_LIST = Object.freeze([]);
 
@@ -90,6 +94,45 @@ export function useIncidentClosure(incidentId) {
   return useSyncExternalStore(subscribe, () => closuresByIncident.get(key) || null);
 }
 
+const EMPTY_VERIFICATION = Object.freeze({ entries: EMPTY_LIST, awaitingSecurityDecision: false });
+
+export function useIncidentVerification(incidentId) {
+  const key = String(incidentId || '');
+  return useSyncExternalStore(subscribe, () => verificationsByIncident.get(key) || EMPTY_VERIFICATION);
+}
+
+function updateIncidentVerification(incidentId, updater) {
+  const key = String(incidentId || '');
+  if (!key) return;
+  verificationsByIncident.set(key, updater(verificationsByIncident.get(key) || EMPTY_VERIFICATION));
+  emitChange();
+}
+
+// Keputusan PIC Security apa pun (assign baru, kembalikan ke PIC, minta verifikasi ulang)
+// menyelesaikan penolakan verifikasi sebelumnya.
+function clearAwaitingSecurityDecision(incidentId) {
+  const current = verificationsByIncident.get(String(incidentId || ''));
+  if (!current?.awaitingSecurityDecision) return;
+  updateIncidentVerification(incidentId, (record) => ({ ...record, awaitingSecurityDecision: false }));
+}
+
+export const INCIDENT_VERIFICATION_STATE = {
+  NO_FOLLOW_UP: 'no_follow_up',
+  IN_PROGRESS: 'in_progress',
+  READY: 'ready',
+  AWAITING_SECURITY: 'awaiting_security',
+  CLOSED: 'closed',
+};
+
+// READY = semua tindak lanjut sudah Approved PIC Security → petugas pelapor verifikasi 1x.
+export function getIncidentVerificationState(followUps, verification, closure) {
+  if (closure) return INCIDENT_VERIFICATION_STATE.CLOSED;
+  if (!followUps?.length) return INCIDENT_VERIFICATION_STATE.NO_FOLLOW_UP;
+  if (verification?.awaitingSecurityDecision) return INCIDENT_VERIFICATION_STATE.AWAITING_SECURITY;
+  const allApproved = followUps.every((item) => item.status === FOLLOW_UP_STATUS.APPROVED || item.status === FOLLOW_UP_STATUS.DONE);
+  return allApproved ? INCIDENT_VERIFICATION_STATE.READY : INCIDENT_VERIFICATION_STATE.IN_PROGRESS;
+}
+
 export function assignFollowUp(incidentId, { assigneeId, instruction, photoUrl, document, actorName }) {
   const at = new Date().toISOString();
   const followUp = {
@@ -104,6 +147,7 @@ export function assignFollowUp(incidentId, { assigneeId, instruction, photoUrl, 
     entries: [createEntry('assign', { actorName, actorRole: 'PIC Security', comment: instruction, photoUrl, at })],
   };
   updateIncidentFollowUps(incidentId, (items) => [...items, followUp]);
+  clearAwaitingSecurityDecision(incidentId);
   return followUp;
 }
 
@@ -115,11 +159,11 @@ export function submitFollowUpUpdate(incidentId, followUpId, { comment, photoUrl
   }));
 }
 
-// approved + requestVerification=false → PIC Security hanya mengonfirmasi rencana tindakan PIC fungsi;
-// pekerjaan belum selesai sehingga status kembali Need Action. Done hanya lewat verifikasi petugas.
-export function submitSecurityReview(incidentId, followUpId, { approved, requestVerification = true, comment, actorName }) {
-  const planConfirmed = approved && !requestVerification;
-  const nextStatus = approved && requestVerification ? FOLLOW_UP_STATUS.NEED_VERIFICATION : FOLLOW_UP_STATUS.NEED_ACTION;
+// approved + finalApproval=false → PIC Security hanya mengonfirmasi rencana tindakan PIC fungsi;
+// pekerjaan belum selesai sehingga status kembali Need Action. finalApproval=true → Approved.
+export function submitSecurityReview(incidentId, followUpId, { approved, finalApproval = true, comment, actorName }) {
+  const planConfirmed = approved && !finalApproval;
+  const nextStatus = approved && finalApproval ? FOLLOW_UP_STATUS.APPROVED : FOLLOW_UP_STATUS.NEED_ACTION;
   updateFollowUp(incidentId, followUpId, (item) => ({
     ...item,
     status: nextStatus,
@@ -127,25 +171,49 @@ export function submitSecurityReview(incidentId, followUpId, { approved, request
   }));
 }
 
-// Mengembalikan true bila verifikasi ini membuat semua tindak lanjut Done → temuan otomatis ditutup.
-export function submitReporterVerification(incidentId, followUpId, { approved, comment, photoUrl, actorName }) {
+// PIC Security mengembalikan tindak lanjut yang sudah Approved ke PIC fungsi untuk dikerjakan ulang
+// (mis. setelah verifikasi petugas ditolak).
+export function returnFollowUpToPic(incidentId, followUpId, { comment, actorName }) {
   updateFollowUp(incidentId, followUpId, (item) => ({
     ...item,
-    status: approved ? FOLLOW_UP_STATUS.DONE : FOLLOW_UP_STATUS.NEED_ACTION,
-    entries: [...item.entries, createEntry('verify', { actorName, actorRole: 'Petugas Pelapor', comment, photoUrl, verdict: approved ? 'approved' : 'rejected' })],
+    status: FOLLOW_UP_STATUS.NEED_ACTION,
+    entries: [...item.entries, createEntry('return', { actorName, actorRole: 'PIC Security', comment, verdict: 'rejected' })],
   }));
+  clearAwaitingSecurityDecision(incidentId);
+}
 
+// Verifikasi 1x oleh petugas pelapor untuk seluruh temuan. Sesuai → semua tindak lanjut Done dan
+// temuan ditutup. Belum sesuai → temuan kembali ke PIC Security untuk diputuskan.
+// Mengembalikan { ok, closed }.
+export function submitIncidentVerification(incidentId, { approved, comment, photoUrl, actorName }) {
   const key = String(incidentId || '');
-  const items = followUpsByIncident.get(key) || EMPTY_LIST;
-  const allDone = items.length > 0 && items.every((item) => item.status === FOLLOW_UP_STATUS.DONE);
-  if (!approved || !allDone || closuresByIncident.has(key)) return false;
-  closuresByIncident.set(key, { id: createId('fu-close'), at: new Date().toISOString(), actorName, comment: '', photoUrl: null });
+  const followUps = followUpsByIncident.get(key) || EMPTY_LIST;
+  const state = getIncidentVerificationState(followUps, verificationsByIncident.get(key), closuresByIncident.get(key));
+  if (state !== INCIDENT_VERIFICATION_STATE.READY) return { ok: false, closed: false };
+
+  const entry = createEntry('verify', { actorName, actorRole: 'Petugas Pelapor', comment, photoUrl, verdict: approved ? 'approved' : 'rejected' });
+  updateIncidentVerification(incidentId, (record) => ({
+    entries: [...record.entries, entry],
+    awaitingSecurityDecision: !approved,
+  }));
+  if (!approved) return { ok: true, closed: false };
+
+  updateIncidentFollowUps(incidentId, (items) => items.map((item) => ({ ...item, status: FOLLOW_UP_STATUS.DONE })));
+  closuresByIncident.set(key, { id: createId('fu-close'), at: entry.at, actorName, comment, photoUrl });
   emitChange();
-  return true;
+  return { ok: true, closed: true };
+}
+
+// PIC Security menilai tindak lanjut yang ada sudah cukup → minta petugas memverifikasi ulang.
+export function requestReverification(incidentId, { comment, actorName }) {
+  updateIncidentVerification(incidentId, (record) => ({
+    entries: [...record.entries, createEntry('reverify', { actorName, actorRole: 'PIC Security', comment })],
+    awaitingSecurityDecision: false,
+  }));
 }
 
 // Contoh data agar keempat status bisa langsung dilihat tanpa menjalankan alur dari awal.
-export function seedDemoFollowUps(incident, { securityName, reporterName }) {
+export function seedDemoFollowUps(incident, { securityName }) {
   const minutesAgo = (minutes) => new Date(Date.now() - minutes * 60_000).toISOString();
   const entry = (kind, minutes, payload) => ({ ...createEntry(kind, payload), at: minutesAgo(minutes) });
   const fleet = getAssigneeMeta('fleet');
@@ -153,12 +221,11 @@ export function seedDemoFollowUps(incident, { securityName, reporterName }) {
 
   const demo = [
     {
-      assigneeId: 'fleet', status: FOLLOW_UP_STATUS.DONE, createdAt: minutesAgo(600), instruction: 'Ganti lampu navigasi yang mati di anjungan dan laporkan nomor work order.',
+      assigneeId: 'fleet', status: FOLLOW_UP_STATUS.APPROVED, createdAt: minutesAgo(600), instruction: 'Ganti lampu navigasi yang mati di anjungan dan laporkan nomor work order.',
       entries: [
         entry('assign', 600, { actorName: securityName, actorRole: 'PIC Security', comment: 'Ganti lampu navigasi yang mati di anjungan dan laporkan nomor work order.' }),
         entry('update', 420, { actorName: fleet.personName, actorRole: 'PIC Fleet', comment: 'Lampu sudah diganti, WO-2026-1187.' }),
-        entry('review', 400, { actorName: securityName, actorRole: 'PIC Security', comment: 'Sesuai, mohon diverifikasi di lapangan.', verdict: 'approved' }),
-        entry('verify', 300, { actorName: reporterName, actorRole: 'Petugas Pelapor', comment: 'Sudah dicek saat patroli, lampu menyala normal.', verdict: 'approved' }),
+        entry('review', 400, { actorName: securityName, actorRole: 'PIC Security', comment: 'Sesuai, pekerjaan selesai.', verdict: 'approved' }),
       ],
     },
     {
@@ -189,11 +256,11 @@ const ENTRY_LOG_LABEL = {
   assign: 'menugaskan tindak lanjut',
   update: 'mengirim update tindak lanjut',
   review: 'memberi feedback',
-  verify: 'mengirim verifikasi',
+  return: 'mengembalikan tindak lanjut ke PIC',
 };
 
 // Bentuk log yang siap digabung dengan riwayat update temuan.
-export function buildFollowUpLogItems(followUps, securityName, closure = null) {
+export function buildFollowUpLogItems(followUps, securityName, closure = null, verification = null) {
   const logs = [];
   if (closure) {
     logs.push({
@@ -202,20 +269,33 @@ export function buildFollowUpLogItems(followUps, securityName, closure = null) {
       createdAt: closure.at,
       author: closure.actorName,
       tag: 'Temuan Ditutup',
-      headline: 'Otomatis ditutup — semua tindak lanjut selesai & terverifikasi petugas',
-      comment: closure.comment,
-      photoUrl: closure.photoUrl,
+      headline: 'Ditutup — semua tindak lanjut di-approve PIC Security & terverifikasi petugas pelapor',
+      comment: '',
+      photoUrl: null,
     });
   }
+  (verification?.entries || []).forEach((entry) => {
+    logs.push({
+      id: entry.id,
+      isFollowUpLog: true,
+      createdAt: entry.at,
+      author: entry.actorName,
+      tag: 'Verifikasi Temuan',
+      headline: entry.kind === 'reverify'
+        ? 'PIC Security meminta verifikasi ulang ke petugas pelapor'
+        : `Petugas Pelapor memverifikasi temuan${entry.verdict === 'approved' ? ' — SESUAI' : ' — BELUM SESUAI, dikembalikan ke PIC Security'}`,
+      comment: entry.comment,
+      photoUrl: entry.photoUrl,
+    });
+  });
   followUps.forEach((followUp, index) => {
     const assignee = getAssigneeMeta(followUp.assigneeId, securityName);
     followUp.entries.forEach((entry) => {
       let verdictText = '';
       if (entry.kind === 'review') {
         if (entry.verdict !== 'approved') verdictText = ' — BELUM SESUAI, dikembalikan ke PIC';
-        else verdictText = entry.planConfirmed ? ' — SESUAI, rencana dikonfirmasi; menunggu penyelesaian dari PIC' : ' — SESUAI, diteruskan ke verifikasi pelapor';
+        else verdictText = entry.planConfirmed ? ' — SESUAI, rencana dikonfirmasi; menunggu penyelesaian dari PIC' : ' — APPROVED';
       }
-      if (entry.kind === 'verify') verdictText = entry.verdict === 'approved' ? ' — TERVERIFIKASI (Done)' : ' — DITOLAK, dikembalikan ke PIC';
       const target = entry.kind === 'assign' ? ` ke ${assignee.label}` : '';
       logs.push({
         id: entry.id,

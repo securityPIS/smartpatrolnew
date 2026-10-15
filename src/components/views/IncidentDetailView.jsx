@@ -11,7 +11,7 @@ import { useIncidents, useReports, useRole, useShips } from '../../context/AppCo
 import { ChevronDown, AlertTriangle, CheckCircle2, Camera, X, Plus, FileText, Trash2, Images, Pencil, Save, MapPin, ExternalLink } from 'lucide-react';
 import AsyncImage from '../AsyncImage';
 import { TimeAuditPills, TimeAuditRecordCard } from '../TimeAuditStatus';
-import { REPORTER_ROLE_ID, SECURITY_ASSIGNEE_ID, buildFollowUpLogItems, formatFollowUpTimestamp, useIncidentClosure, useIncidentFollowUps } from '../incidentFollowUp/followUpStore';
+import { REPORTER_ROLE_ID, SECURITY_ASSIGNEE_ID, buildFollowUpLogItems, formatFollowUpTimestamp, useIncidentClosure, useIncidentFollowUps, useIncidentVerification } from '../incidentFollowUp/followUpStore';
 import { FollowUpAssignCard, FollowUpRoleSwitcher, FollowUpSectionList, FollowUpToast } from '../incidentFollowUp/FollowUpPanels';
 
 function normalizeIncidentMetaKeyPart(value) {
@@ -199,6 +199,7 @@ export default function IncidentDetailView({ isInline = false }) {
   const [followUpToast, setFollowUpToast] = useState(null);
   const followUps = useIncidentFollowUps(selectedIncident?.id);
   const followUpClosure = useIncidentClosure(selectedIncident?.id);
+  const followUpVerification = useIncidentVerification(selectedIncident?.id);
   const dismissFollowUpToast = useCallback(() => setFollowUpToast(null), []);
   const showFollowUpToast = useCallback((message) => setFollowUpToast({ id: Date.now(), message }), []);
 
@@ -269,7 +270,7 @@ export default function IncidentDetailView({ isInline = false }) {
     && (!showFollowUpFeature || followUpSimRole === SECURITY_ASSIGNEE_ID || followUpSimRole === REPORTER_ROLE_ID);
   const historyItems = mergeIncidentHistoryItems(
     progressItems,
-    showFollowUpFeature ? buildFollowUpLogItems(followUps, followUpSecurityName, followUpClosure) : [],
+    showFollowUpFeature ? buildFollowUpLogItems(followUps, followUpSecurityName, followUpClosure, followUpVerification) : [],
   );
 
   const saveIncidentInfo = () => {
@@ -589,6 +590,8 @@ export default function IncidentDetailView({ isInline = false }) {
               <FollowUpSectionList
                 incident={selectedIncident}
                 followUps={followUps}
+                verification={followUpVerification}
+                closure={followUpClosure}
                 simRole={followUpSimRole}
                 securityName={followUpSecurityName}
                 reporterName={followUpReporterName}

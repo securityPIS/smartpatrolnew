@@ -61,3 +61,11 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
   Titik tanpa NFC (tambahan shift/belum didaftarkan) bisa dibuka manual (ditandai "Tanpa NFC").
 - NFC native via `@capgo/capacitor-nfc` (`services/native/nfc.js`); browser pakai Web NFC. Setelah ubah
   plugin jalankan `npx cap sync android` (hapus lagi file generated yang tak di-track).
+
+## Verifikasi temuan (tindak lanjut) — `src/components/incidentFollowUp/`
+- Status tindak lanjut: Need Action → Need Review → (PIC Security) **Approved** → Done. "Konfirmasi
+  Rencana" mengembalikan ke Need Action; hanya "Approve" yang dihitung selesai.
+- Petugas pelapor verifikasi **1x per temuan** (`submitIncidentVerification`) hanya bila SEMUA tindak
+  lanjut Approved. Sesuai → semua Done + temuan Closed. Belum sesuai → `awaitingSecurityDecision`;
+  PIC Security memutuskan: `returnFollowUpToPic`, assign baru, atau `requestReverification`.
+- Store masih dummy in-memory (belum ke database).

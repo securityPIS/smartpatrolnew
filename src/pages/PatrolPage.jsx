@@ -20,6 +20,7 @@ import PatrolNfcChoiceSheet from '../components/modals/PatrolNfcChoiceSheet';
 import { usePatrolNfcScan } from '../hooks/usePatrolNfcScan';
 import { openNfcSettings } from '../services/native/nfc';
 import { createCheckpointNameKey, normalizeShipCheckpointDefinitions } from '../utils/shipCheckpoints';
+import { createCheckpointTemuanKey, getCheckpointTemuanState, useCheckpointTemuanVersion } from '../components/incidentFollowUp/followUpStore';
 import AsyncImage from '../components/AsyncImage';
 import HistoryDetailView from '../components/views/HistoryDetailView';
 import ShiftStatusModal from '../components/modals/ShiftStatusModal';
@@ -214,6 +215,22 @@ const PatrolPage = React.memo(function PatrolPage() {
     item?.isTemporaryShiftNode ? null : definitionByNameKey.get(createCheckpointNameKey(item?.name)) || null
   ), [definitionByNameKey]);
 
+  // Status temuan per titik (store tindak lanjut dummy): temuan berjalan menyembunyikan AMAN,
+  // temuan Unsolve mengganti foto acuan dengan kondisi saat unsolve.
+  const checkpointTemuanVersion = useCheckpointTemuanVersion();
+  const temuanShipKey = operationalShip?.id || operationalShipName || '';
+  const getTemuanStateForItem = React.useCallback((item) => (
+    isHistoryMode || item?.isTemporaryShiftNode
+      ? getCheckpointTemuanState('')
+      : getCheckpointTemuanState(createCheckpointTemuanKey(temuanShipKey, item?.name))
+  ), [isHistoryMode, temuanShipKey, checkpointTemuanVersion]);
+  const getReferencePhotoForItem = React.useCallback((item, definition) => {
+    const override = getTemuanStateForItem(item).override;
+    return override?.referencePhotoUrl
+      ? { url: override.referencePhotoUrl, isUnsolve: true }
+      : { url: definition?.referencePhotoUrl || null, isUnsolve: false };
+  }, [getTemuanStateForItem]);
+
   const isNfcScanActive = !isHistoryMode
     && patrolTab === 'checkpoint'
     && canPatrolCurrentShip
@@ -234,15 +251,16 @@ const PatrolPage = React.memo(function PatrolPage() {
   const handleNfcChoice = React.useCallback((type) => {
     const selection = nfcSelection;
     if (!selection) return;
+    if (type === 'aman' && getTemuanStateForItem(selection.item).hasOpenTemuan) return;
     setNfcSelection(null);
     handleActionClick(selection.item.id, type, selection.verified
       ? {
         tagId: selection.tagId,
         verifiedAt: selection.verifiedAt,
-        referencePhotoUrl: selection.definition?.referencePhotoUrl || null,
+        referencePhotoUrl: getReferencePhotoForItem(selection.item, selection.definition).url,
       }
       : null);
-  }, [handleActionClick, nfcSelection]);
+  }, [getReferencePhotoForItem, getTemuanStateForItem, handleActionClick, nfcSelection]);
 
   // Kelompokkan item patroli: main diikuti sub-nya (urutan definisi sudah main → sub). Sub yang
   // induknya tidak ikut tampil (mis. tersaring pencarian) dirender sendiri dengan label induk.
@@ -266,8 +284,9 @@ const PatrolPage = React.memo(function PatrolPage() {
 
   const renderPatrolListItem = (item, { standalone = false } = {}) => {
     const definition = getDefinitionForItem(item);
-    const referencePhotoUrl = definition?.referencePhotoUrl || null;
-    if (item.status === 'completed') return renderSummaryListItem(item, { referencePhotoUrl });
+    const referencePhoto = getReferencePhotoForItem(item, definition);
+    if (item.status === 'completed') return renderSummaryListItem(item, { referencePhoto });
+    const { hasOpenTemuan } = getTemuanStateForItem(item);
 
     const hasNfc = Boolean(definition?.nfcTagId);
     // Label induk hanya untuk sub yang tampil di luar kelompok main-nya.
@@ -298,9 +317,19 @@ const PatrolPage = React.memo(function PatrolPage() {
                 </span>
               )}
             </div>
+            {(hasOpenTemuan || referencePhoto.isUnsolve) && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {hasOpenTemuan && (
+                  <span className="text-[9px] uppercase tracking-widest text-yellow-300 border border-yellow-500/40 px-1.5 py-0.5 rounded" title="Temuan masih dalam tindak lanjut">Temuan Open</span>
+                )}
+                {referencePhoto.isUnsolve && (
+                  <span className="text-[9px] uppercase tracking-widest text-orange-300 border border-orange-500/40 px-1.5 py-0.5 rounded" title="Foto acuan diperbarui dari temuan Unsolve">Acuan Unsolve</span>
+                )}
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
-            {renderReferencePhotoButton(item, referencePhotoUrl)}
+            {renderReferencePhotoButton(item, referencePhoto)}
             {hasNfc ? (
               <span className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[10px] font-bold uppercase tracking-wider ${isCheckpointLocked ? 'border-slate-800 text-slate-500' : 'border-cyan-600/50 bg-cyan-500/10 text-cyan-200'}`}>
                 <Nfc className="w-3.5 h-3.5" /> Tap NFC
@@ -397,22 +426,22 @@ const PatrolPage = React.memo(function PatrolPage() {
     setPatrolTab('info');
   }, [setPatrolTab]);
 
-  const openReferencePhoto = React.useCallback((item, referencePhotoUrl) => {
-    if (!referencePhotoUrl) return;
-    setPreviewPhoto({ url: referencePhotoUrl, author: `Kondisi awal · ${item.name}` });
+  const openReferencePhoto = React.useCallback((item, referencePhoto) => {
+    if (!referencePhoto?.url) return;
+    setPreviewPhoto({ url: referencePhoto.url, author: `${referencePhoto.isUnsolve ? 'Kondisi saat Unsolve' : 'Kondisi awal'} · ${item.name}` });
   }, [setPreviewPhoto]);
 
-  const renderReferencePhotoButton = React.useCallback((item, referencePhotoUrl) => (
-    referencePhotoUrl ? (
+  const renderReferencePhotoButton = React.useCallback((item, referencePhoto) => (
+    referencePhoto?.url ? (
       <button
         type="button"
         onClick={(event) => {
           event.stopPropagation();
-          openReferencePhoto(item, referencePhotoUrl);
+          openReferencePhoto(item, referencePhoto);
         }}
-        className="shrink-0 p-2 rounded-xl border border-cyan-800/70 bg-[#070b19] text-cyan-300 hover:border-cyan-500/60 hover:text-cyan-100 transition-colors"
+        className={`shrink-0 p-2 rounded-xl border bg-[#070b19] transition-colors ${referencePhoto.isUnsolve ? 'border-orange-500/60 text-orange-300 hover:text-orange-100' : 'border-cyan-800/70 text-cyan-300 hover:border-cyan-500/60 hover:text-cyan-100'}`}
         aria-label={`Lihat foto kondisi awal ${item.name}`}
-        title="Foto kondisi awal"
+        title={referencePhoto.isUnsolve ? 'Foto kondisi awal (diperbarui dari Unsolve)' : 'Foto kondisi awal'}
       >
         <ImageIcon className="w-4 h-4" />
       </button>
@@ -452,8 +481,8 @@ const PatrolPage = React.memo(function PatrolPage() {
             </span>
           </div>
         </div>
-        {options.referencePhotoUrl && (
-          <div className="mr-2">{renderReferencePhotoButton(item, options.referencePhotoUrl)}</div>
+        {options.referencePhoto?.url && (
+          <div className="mr-2">{renderReferencePhotoButton(item, options.referencePhoto)}</div>
         )}
         <div
           onClick={(event) => {
@@ -725,6 +754,7 @@ const PatrolPage = React.memo(function PatrolPage() {
        {nfcSelection && (
          <PatrolNfcChoiceSheet
            selection={nfcSelection}
+           temuanState={getTemuanStateForItem(nfcSelection.item)}
            parentName={nfcSelection.definition?.type === 'sub' ? definitionById.get(nfcSelection.definition.parentId)?.name : ''}
            onChoose={handleNfcChoice}
            onClose={() => setNfcSelection(null)}

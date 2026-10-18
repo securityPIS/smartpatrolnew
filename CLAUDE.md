@@ -68,4 +68,11 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
 - Petugas pelapor verifikasi **1x per temuan** (`submitIncidentVerification`) hanya bila SEMUA tindak
   lanjut Approved. Sesuai → semua Done + temuan Closed. Belum sesuai → `awaitingSecurityDecision`;
   PIC Security memutuskan: `returnFollowUpToPic`, assign baru, atau `requestReverification`.
+- **UNSOLVE** (khusus PIC Security, tombol "Unsolve Temuan" di tab Update): `unsolveIncident(incident, …)`
+  menutup semua tindak lanjut (status Unsolve), catatan wajib, evidence opsional. Temuan bukan Aman
+  bukan Closed. Kondisi saat unsolve (evidence, atau foto temuan bila kosong) jadi foto acuan baru
+  titik (`referenceOverridesByCheckpoint`, kunci `shipId|nama titik`).
+- Patroli (`PatrolPage` + `PatrolNfcChoiceSheet`): titik dengan temuan yang masih berjalan di alur
+  tindak lanjut → tombol AMAN disembunyikan; setelah Closed/Unsolve AMAN muncul lagi, foto acuan pakai
+  override Unsolve. `CheckpointPatrolSimulation` (tab Update) = pratinjau tap NFC untuk simulasi.
 - Store masih dummy in-memory (belum ke database).

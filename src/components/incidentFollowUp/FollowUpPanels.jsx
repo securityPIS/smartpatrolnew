@@ -1,16 +1,18 @@
 /*
 Tujuan: Tampilan alur tindak lanjut temuan (versi dummy): assign oleh PIC Security, update PIC fungsi,
         feedback/approve PIC Security, lalu satu kali verifikasi petugas pelapor setelah semua
-        tindak lanjut Approved, beserta switcher simulasi role.
+        tindak lanjut Approved, penutupan UNSOLVE oleh PIC Security, beserta switcher simulasi role.
 Caller: IncidentDetailView (tab Info di bawah HOW, dan tab Update di atas Riwayat Update).
 Dependensi: followUpStore (state dummy), followUpPdf (dokumen otomatis), AsyncImage, ikon lucide-react.
 Main Functions: FollowUpRoleSwitcher, FollowUpAssignCard, FollowUpSectionList, FollowUpToast.
+                FollowUpSectionList juga memuat tombol & modal Unsolve (khusus PIC Security).
 Side Effects: Mengubah store dummy di memori dan membuka PDF; tidak menyentuh database.
 */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Camera, CheckCircle2, ChevronDown, ClipboardList, Eye, FileText, RotateCcw, Send, ShieldAlert, ShieldCheck, UserCheck, X, XCircle } from 'lucide-react';
+import { Ban, Camera, CheckCircle2, ChevronDown, ClipboardList, Eye, FileText, ImageIcon, RotateCcw, Send, ShieldAlert, ShieldCheck, UserCheck, X, XCircle } from 'lucide-react';
 import AsyncImage from '../AsyncImage';
+import PatrolNfcChoiceSheet from '../modals/PatrolNfcChoiceSheet';
 import {
   FOLLOW_UP_STATUS,
   FOLLOW_UP_STATUS_META,
@@ -19,15 +21,20 @@ import {
   REPORTER_ROLE_ID,
   SECURITY_ASSIGNEE_ID,
   assignFollowUp,
+  createCheckpointTemuanKey,
   formatFollowUpTimestamp,
   getAssigneeMeta,
   getIncidentVerificationState,
+  getUnsolveReferencePhotoUrl,
+  rememberIncidentCheckpoint,
   requestReverification,
   returnFollowUpToPic,
   seedDemoFollowUps,
   submitFollowUpUpdate,
   submitIncidentVerification,
   submitSecurityReview,
+  unsolveIncident,
+  useCheckpointTemuanState,
 } from './followUpStore';
 import { buildFollowUpPdfFileName, openFollowUpPdf } from './followUpPdf';
 
@@ -110,8 +117,8 @@ function VerdictToggle({ value, onChange, approveLabel = 'Sudah Sesuai', rejectL
 const PRIMARY_ACTION_CLASS = 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20 border-emerald-400/20';
 
 // `actions` opsional: beberapa tombol submit berdampingan; default satu tombol submit.
-function FollowUpModal({ title, subtitle, onClose, onSubmit, submitLabel, canSubmit, actions, children }) {
-  const footerActions = actions || [{ key: 'submit', label: submitLabel, onClick: onSubmit, disabled: !canSubmit, colorClass: PRIMARY_ACTION_CLASS }];
+function FollowUpModal({ title, subtitle, onClose, onSubmit, submitLabel, canSubmit, submitColorClass = PRIMARY_ACTION_CLASS, actions, children }) {
+  const footerActions = actions || [{ key: 'submit', label: submitLabel, onClick: onSubmit, disabled: !canSubmit, colorClass: submitColorClass }];
   return (
     <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-4">
       <div className="absolute inset-0 bg-[#070b19]/90 backdrop-blur-md animate-in fade-in" onClick={onClose}></div>
@@ -238,6 +245,7 @@ function AssignFollowUpModal({ incident, securityName, nextSequence, onClose, on
 
   const handleSubmit = () => {
     if (!canSubmit) return;
+    rememberIncidentCheckpoint(incident);
     assignFollowUp(incident.id, {
       assigneeId,
       instruction: instruction.trim(),
@@ -457,7 +465,72 @@ function ReverifyRequestModal({ incident, reporterName, securityName, onClose, o
   );
 }
 
-export function FollowUpAssignCard({ incident, followUps, simRole, securityName, isClosed, onToast, onOpenUpdateTab }) {
+const UNSOLVE_ACTION_CLASS = 'bg-orange-600 hover:bg-orange-500 shadow-orange-500/20 border-orange-400/20';
+
+function UnsolveIncidentModal({ incident, followUps, securityName, onClose, onSubmitted }) {
+  const [comment, setComment] = useState('');
+  const [photoUrl, setPhotoUrl] = useState(null);
+  const canSubmit = Boolean(comment.trim());
+  const openFollowUps = followUps.filter((item) => item.status !== FOLLOW_UP_STATUS.DONE);
+  const nextReferencePhotoUrl = getUnsolveReferencePhotoUrl(incident, photoUrl);
+  const checkpointName = incident.isPatrol ? incident.location : '';
+
+  const handleSubmit = () => {
+    if (!canSubmit) return;
+    const result = unsolveIncident(incident, { comment: comment.trim(), photoUrl, actorName: securityName });
+    onSubmitted({ ...result, checkpointName });
+  };
+
+  return (
+    <FollowUpModal title="Unsolve Temuan" subtitle={`${incident.location || 'Temuan'} · PIC Security`} onClose={onClose} onSubmit={handleSubmit} submitLabel="Tetapkan Unsolve" canSubmit={canSubmit} submitColorClass={UNSOLVE_ACTION_CLASS}>
+      <div className="p-3 rounded-xl border border-orange-500/40 bg-orange-500/5 space-y-1">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-orange-300">Temuan tidak dapat diselesaikan</p>
+        <p className="text-[11px] text-cyan-200 leading-relaxed">
+          Status temuan menjadi <span className="font-bold text-orange-300">UNSOLVE</span> (bukan Aman, bukan Closed).
+          {openFollowUps.length > 0 ? ` ${openFollowUps.length} tindak lanjut ikut ditutup.` : ' Belum ada tindak lanjut yang berjalan.'}
+        </p>
+      </div>
+
+      {openFollowUps.length > 0 && (
+        <div className="space-y-1.5">
+          {openFollowUps.map((followUp) => (
+            <div key={followUp.id} className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-cyan-100 truncate">#{followUps.indexOf(followUp) + 1} · {getAssigneeMeta(followUp.assigneeId, securityName).label}</span>
+              <span className="flex items-center gap-1 shrink-0"><StatusBadge status={followUp.status} /><span className="text-cyan-700">→</span><StatusBadge status={FOLLOW_UP_STATUS.UNSOLVED} /></span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div>
+        <label className={LABEL_CLASS}>Catatan Unsolve <span className="text-rose-400">*</span></label>
+        <textarea autoFocus value={comment} onChange={(event) => setComment(event.target.value)} rows={4} placeholder="Jelaskan kenapa temuan tidak dapat diselesaikan dan kondisi yang diterima saat ini..." className={TEXTAREA_CLASS} />
+      </div>
+
+      <PhotoField label="Evidence" value={photoUrl} onChange={setPhotoUrl} />
+
+      {checkpointName && (
+        <div>
+          <label className={LABEL_CLASS}>Foto kondisi awal titik baru</label>
+          <div className="flex items-center gap-3 p-3 rounded-xl border border-cyan-900/50 bg-[#070b19]/40">
+            <div className="w-20 h-14 rounded-lg overflow-hidden border border-cyan-800 shrink-0 bg-[#070b19] flex items-center justify-center">
+              {nextReferencePhotoUrl
+                ? <AsyncImage src={nextReferencePhotoUrl} className="w-full h-full object-cover" alt="Foto acuan baru" />
+                : <ImageIcon className="w-5 h-5 text-cyan-800" />}
+            </div>
+            <p className="text-[11px] text-cyan-300 leading-relaxed">
+              {nextReferencePhotoUrl
+                ? <>Foto acuan titik <span className="font-bold text-cyan-100">{checkpointName}</span> diganti dengan {photoUrl ? 'evidence ini' : 'foto temuan'}. Tombol <span className="font-bold text-emerald-300">AMAN</span> muncul lagi di titik ini.</>
+                : <>Tidak ada foto; foto acuan titik <span className="font-bold text-cyan-100">{checkpointName}</span> tetap. Tombol <span className="font-bold text-emerald-300">AMAN</span> muncul lagi di titik ini.</>}
+            </p>
+          </div>
+        </div>
+      )}
+    </FollowUpModal>
+  );
+}
+
+export function FollowUpAssignCard({ incident, followUps, simRole, securityName, isClosed, isUnsolved = false, onToast, onOpenUpdateTab }) {
   const [showAssignForm, setShowAssignForm] = useState(false);
   const canAssign = !isClosed && simRole === SECURITY_ASSIGNEE_ID;
   const approvedCount = followUps.filter((item) => item.status === FOLLOW_UP_STATUS.APPROVED || item.status === FOLLOW_UP_STATUS.DONE).length;
@@ -492,7 +565,7 @@ export function FollowUpAssignCard({ incident, followUps, simRole, securityName,
           <Send className="w-4 h-4" /> Assign Tindak Lanjut
         </button>
       ) : (
-        <p className="text-[11px] text-amber-300/80">{isClosed ? 'Temuan sudah ditutup.' : 'Hanya PIC Security yang dapat menugaskan tindak lanjut.'}</p>
+        <p className="text-[11px] text-amber-300/80">{isUnsolved ? 'Temuan Unsolve — ditutup PIC Security tanpa penyelesaian.' : isClosed ? 'Temuan sudah ditutup.' : 'Hanya PIC Security yang dapat menugaskan tindak lanjut.'}</p>
       )}
 
       {showAssignForm && (
@@ -514,6 +587,7 @@ export function FollowUpAssignCard({ incident, followUps, simRole, securityName,
 }
 
 function getWaitingHint(followUp, assignee, reporterName, isClosed) {
+  if (followUp.status === FOLLOW_UP_STATUS.UNSOLVED) return 'Ditutup sebagai Unsolve oleh PIC Security.';
   if (isClosed && followUp.status !== FOLLOW_UP_STATUS.DONE) return 'Temuan sudah ditutup.';
   if (followUp.status === FOLLOW_UP_STATUS.NEED_ACTION) {
     const lastReview = [...followUp.entries].reverse().find((entry) => entry.kind === 'review');
@@ -531,6 +605,7 @@ const ENTRY_TITLES = {
   update: 'Update PIC',
   review: 'Feedback PIC Security',
   return: 'Dikembalikan ke PIC',
+  unsolve: 'Ditutup · Unsolve',
 };
 
 function getFollowUpActions(followUp, simRole, isClosed) {
@@ -604,7 +679,7 @@ function FollowUpSection({ incident, followUp, sequence, simRole, securityName, 
               <div className="space-y-3 border-l-2 border-cyan-900 ml-1 pl-3">
                 {activityEntries.map((entry) => {
                   const stamp = formatFollowUpTimestamp(entry.at);
-                  const verdictClass = entry.verdict === 'approved' ? 'text-emerald-400' : entry.verdict === 'rejected' ? 'text-rose-400' : 'text-cyan-400';
+                  const verdictClass = entry.kind === 'unsolve' ? 'text-orange-300' : entry.verdict === 'approved' ? 'text-emerald-400' : entry.verdict === 'rejected' ? 'text-rose-400' : 'text-cyan-400';
                   return (
                     <div key={entry.id}>
                       <p className="text-[10px] font-mono text-cyan-600">{stamp.date} {stamp.time} · <span className="text-cyan-300 font-bold">{entry.actorName}</span></p>
@@ -646,8 +721,40 @@ function FollowUpSection({ incident, followUp, sequence, simRole, securityName, 
   );
 }
 
+function IncidentUnsolveCard({ unsolve, onPreviewPhoto }) {
+  const stamp = formatFollowUpTimestamp(unsolve.at);
+  return (
+    <div className="p-3.5 rounded-xl border border-orange-500/40 bg-orange-500/5 space-y-2">
+      <div className="flex items-start gap-3">
+        <Ban className="w-5 h-5 text-orange-400 shrink-0 mt-0.5" />
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-bold text-orange-300 uppercase tracking-widest">Temuan Unsolve</p>
+          <p className="text-[11px] text-cyan-400 mt-0.5">Ditutup oleh {unsolve.actorName} · {stamp.date} {stamp.time}</p>
+          <p className="text-xs text-cyan-100 whitespace-pre-wrap mt-1.5">{unsolve.comment}</p>
+        </div>
+        {unsolve.photoUrl && (
+          <button type="button" onClick={() => onPreviewPhoto({ url: unsolve.photoUrl, author: unsolve.actorName, time: `${stamp.date} ${stamp.time}` })} className="w-14 h-14 rounded-lg overflow-hidden border border-orange-500/40 shrink-0 hover:opacity-80 transition-all" aria-label="Lihat evidence unsolve">
+            <AsyncImage src={unsolve.photoUrl} className="w-full h-full object-cover" alt="Evidence unsolve" />
+          </button>
+        )}
+      </div>
+      {unsolve.checkpointKey && unsolve.referencePhotoUrl && (
+        <p className="text-[10px] text-emerald-300/90 flex items-center gap-1.5"><ImageIcon className="w-3 h-3 shrink-0" /> Foto kondisi awal titik diperbarui · tombol AMAN tersedia lagi.</p>
+      )}
+    </div>
+  );
+}
+
+function UnsolveActionButton({ onClick }) {
+  return (
+    <button type="button" onClick={onClick} className="w-full py-3 border border-orange-500/50 text-orange-300 rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-orange-500/10 transition-all active:scale-[0.98]">
+      <Ban className="w-4 h-4" /> Unsolve Temuan
+    </button>
+  );
+}
+
 function IncidentVerificationCard({ state, followUps, verification, closure, simRole, reporterName, onAction }) {
-  if (state === INCIDENT_VERIFICATION_STATE.NO_FOLLOW_UP) return null;
+  if (state === INCIDENT_VERIFICATION_STATE.NO_FOLLOW_UP || state === INCIDENT_VERIFICATION_STATE.UNSOLVED) return null;
   const approvedCount = followUps.filter((item) => item.status === FOLLOW_UP_STATUS.APPROVED || item.status === FOLLOW_UP_STATUS.DONE).length;
   const lastVerify = [...(verification?.entries || [])].reverse().find((entry) => entry.kind === 'verify');
 
@@ -720,11 +827,13 @@ function IncidentVerificationCard({ state, followUps, verification, closure, sim
   );
 }
 
-export function FollowUpSectionList({ incident, followUps, verification, closure, simRole, securityName, reporterName, isClosed, onToast, onPreviewPhoto }) {
+export function FollowUpSectionList({ incident, followUps, verification, closure, unsolve = null, simRole, securityName, reporterName, isClosed, onToast, onPreviewPhoto }) {
   const [activeAction, setActiveAction] = useState(null);
   const [isListExpanded, setIsListExpanded] = useState(false);
   const approvedCount = followUps.filter((followUp) => followUp.status === FOLLOW_UP_STATUS.APPROVED || followUp.status === FOLLOW_UP_STATUS.DONE).length;
-  const verificationState = getIncidentVerificationState(followUps, verification, closure);
+  const verificationState = getIncidentVerificationState(followUps, verification, closure, unsolve);
+  // Unsolve: opsi PIC Security selama temuan masih berjalan (bukan tindakan wajib → tidak dihitung).
+  const canUnsolve = !isClosed && simRole === SECURITY_ASSIGNEE_ID;
   const hasIncidentAction = (verificationState === INCIDENT_VERIFICATION_STATE.READY && simRole === REPORTER_ROLE_ID)
     || (verificationState === INCIDENT_VERIFICATION_STATE.AWAITING_SECURITY && simRole === SECURITY_ASSIGNEE_ID);
   const myActionCount = followUps.filter((followUp) => {
@@ -746,7 +855,9 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
           <div className="flex-1 min-w-0">
             <p className="text-xs font-bold text-cyan-400 uppercase tracking-widest">Tindak Lanjut ({followUps.length})</p>
             <p className="text-[10px] text-cyan-600 mt-0.5">
-              {followUps.length === 0 ? 'Belum ada tindak lanjut' : `${approvedCount} approved · ${followUps.length - approvedCount} berjalan`}
+              {unsolve
+                ? <span className="text-orange-300">Unsolve · semua tindak lanjut ditutup</span>
+                : followUps.length === 0 ? 'Belum ada tindak lanjut' : `${approvedCount} approved · ${followUps.length - approvedCount} berjalan`}
             </p>
           </div>
           {myActionCount > 0 && <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-wider shrink-0">{myActionCount} perlu tindakan</span>}
@@ -754,12 +865,15 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
         </button>
 
         {isListExpanded && (
-          <div className="px-3 pb-3 animate-in fade-in">
+          <div className="px-3 pb-3 space-y-3 animate-in fade-in">
+            {unsolve && <IncidentUnsolveCard unsolve={unsolve} onPreviewPhoto={onPreviewPhoto} />}
             {followUps.length === 0 ? (
-              <div className="text-center border border-dashed border-cyan-900/50 p-4 rounded-xl space-y-2">
-                <p className="text-sm text-cyan-700 italic">Belum ada tindak lanjut. PIC Security dapat menugaskan dari tab Info (5W1H) di bawah HOW.</p>
-                <button type="button" onClick={handleSeedDemo} className="text-[10px] font-bold uppercase tracking-widest text-cyan-400 hover:text-cyan-200 underline underline-offset-4">Muat data contoh</button>
-              </div>
+              !unsolve && (
+                <div className="text-center border border-dashed border-cyan-900/50 p-4 rounded-xl space-y-2">
+                  <p className="text-sm text-cyan-700 italic">Belum ada tindak lanjut. PIC Security dapat menugaskan dari tab Info (5W1H) di bawah HOW.</p>
+                  <button type="button" onClick={handleSeedDemo} className="text-[10px] font-bold uppercase tracking-widest text-cyan-400 hover:text-cyan-200 underline underline-offset-4">Muat data contoh</button>
+                </div>
+              )
             ) : (
               <div className="space-y-3">
                 <IncidentVerificationCard
@@ -790,6 +904,13 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
           </div>
         )}
       </div>
+
+      {canUnsolve && (
+        <div className="mt-3">
+          <UnsolveActionButton onClick={() => setActiveAction({ type: 'unsolve' })} />
+          <p className="text-[10px] text-cyan-700 mt-1.5 ml-1">Hanya PIC Security · menutup semua tindak lanjut bila temuan tidak dapat diselesaikan.</p>
+        </div>
+      )}
 
       {activeAction?.type === 'update' && (
         <UpdateFollowUpModal
@@ -847,6 +968,20 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
           }}
         />
       )}
+      {activeAction?.type === 'unsolve' && (
+        <UnsolveIncidentModal
+          incident={incident}
+          followUps={followUps}
+          securityName={securityName}
+          onClose={closeAction}
+          onSubmitted={({ ok, referenceUpdated, checkpointName }) => {
+            closeAction();
+            if (!ok) onToast('Unsolve tidak bisa disimpan: temuan sudah ditutup.');
+            else if (referenceUpdated) onToast(`Temuan ditetapkan UNSOLVE. Semua tindak lanjut ditutup.\nFoto kondisi awal titik ${checkpointName} diperbarui — tombol AMAN tersedia lagi.`);
+            else onToast('Temuan ditetapkan UNSOLVE. Semua tindak lanjut ditutup.');
+          }}
+        />
+      )}
       {activeAction?.type === 'reverify' && (
         <ReverifyRequestModal
           incident={incident}
@@ -857,6 +992,46 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
             closeAction();
             onToast(`Permintaan verifikasi ulang dikirim ke petugas pelapor (${reporterName}).`);
           }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Simulasi (dummy) tampilan petugas saat tap NFC di titik asal temuan: memperlihatkan efek status
+// temuan pada titik — AMAN tersembunyi selama tindak lanjut berjalan, foto acuan & AMAN setelah Unsolve.
+export function CheckpointPatrolSimulation({ incident, definition, onToast, onPreviewPhoto }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const temuanState = useCheckpointTemuanState(createCheckpointTemuanKey(incident?.shipId || incident?.shipName, incident?.location));
+  if (!incident?.isPatrol || !incident.location) return null;
+
+  const statusText = temuanState.override
+    ? 'Foto acuan diperbarui (Unsolve) · tombol AMAN tersedia'
+    : temuanState.hasOpenTemuan
+      ? 'Temuan berjalan · tombol AMAN disembunyikan'
+      : 'Tombol AMAN & TEMUAN tersedia';
+
+  return (
+    <div className="rounded-xl border border-fuchsia-900/50 bg-[#0b1229]/60 p-3.5 flex items-center gap-3">
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-bold text-fuchsia-300 uppercase tracking-widest">Titik {incident.location}</p>
+        <p className="text-[10px] text-cyan-600 mt-0.5">{statusText}</p>
+      </div>
+      <button type="button" onClick={() => setIsOpen(true)} className="shrink-0 px-3 py-2 rounded-xl border border-fuchsia-500/40 text-fuchsia-200 hover:bg-fuchsia-500/10 transition-all">
+        <span className="text-[10px] font-black uppercase tracking-widest">Simulasi Tap</span>
+      </button>
+      {isOpen && (
+        <PatrolNfcChoiceSheet
+          selection={{ item: { id: `sim-${incident.id}`, name: incident.location }, definition, verified: Boolean(definition?.nfcTagId) }}
+          temuanState={temuanState}
+          zIndexClass="z-[115]"
+          simulationLabel="Simulasi tampilan petugas patroli"
+          onChoose={(type) => {
+            setIsOpen(false);
+            onToast(`Simulasi: petugas memilih ${type === 'aman' ? 'AMAN' : 'TEMUAN'} di titik ${incident.location}. (Tidak membuat laporan)`);
+          }}
+          onClose={() => setIsOpen(false)}
+          onPreviewPhoto={(url) => onPreviewPhoto({ url, author: `Foto acuan · ${incident.location}` })}
         />
       )}
     </div>

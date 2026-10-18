@@ -1,23 +1,28 @@
 /*
 Tujuan: Store dummy (in-memory, tanpa database) untuk alur tindak lanjut temuan: assign PIC fungsi,
         update PIC fungsi, feedback/approve PIC Security, lalu SATU kali verifikasi petugas pelapor
-        untuk seluruh temuan setelah semua tindak lanjut di-approve.
-Caller: Komponen di folder incidentFollowUp dan IncidentDetailView.
-Dependensi: React useSyncExternalStore, followUpPdf (nama file dokumen).
+        untuk seluruh temuan setelah semua tindak lanjut di-approve. PIC Security juga bisa menutup
+        temuan sebagai UNSOLVE (tidak bisa diselesaikan) → kondisi saat unsolve menjadi foto acuan
+        baru titik checkpoint dan tombol AMAN muncul lagi di titik tersebut.
+Caller: Komponen di folder incidentFollowUp, IncidentDetailView, PatrolPage, PatrolNfcChoiceSheet.
+Dependensi: React useSyncExternalStore, followUpPdf (nama file dokumen), shipCheckpoints (kunci nama).
 Main Functions: useIncidentFollowUps, useIncidentVerification, getIncidentVerificationState,
                 assignFollowUp, submitFollowUpUpdate, submitSecurityReview, returnFollowUpToPic,
-                submitIncidentVerification, requestReverification, seedDemoFollowUps.
+                submitIncidentVerification, requestReverification, unsolveIncident,
+                useCheckpointTemuanState, seedDemoFollowUps.
 Side Effects: Hanya state modul di memori; hilang saat aplikasi di-restart (sengaja, versi tampilan).
 */
 
 import { useSyncExternalStore } from 'react';
 import { buildFollowUpPdfFileName } from './followUpPdf.js';
+import { createCheckpointNameKey } from '../../utils/shipCheckpoints.js';
 
 export const FOLLOW_UP_STATUS = {
   NEED_ACTION: 'need_action',
   NEED_REVIEW: 'need_review',
   APPROVED: 'approved',
   DONE: 'done',
+  UNSOLVED: 'unsolved',
 };
 
 export const FOLLOW_UP_STATUS_META = {
@@ -25,6 +30,7 @@ export const FOLLOW_UP_STATUS_META = {
   [FOLLOW_UP_STATUS.NEED_REVIEW]: { label: 'Need Review', badgeClass: 'bg-sky-500/10 border-sky-500/60 text-sky-300' },
   [FOLLOW_UP_STATUS.APPROVED]: { label: 'Approved', badgeClass: 'bg-teal-500/10 border-teal-500/60 text-teal-300' },
   [FOLLOW_UP_STATUS.DONE]: { label: 'Done', badgeClass: 'bg-emerald-500/10 border-emerald-500/60 text-emerald-300' },
+  [FOLLOW_UP_STATUS.UNSOLVED]: { label: 'Unsolve', badgeClass: 'bg-orange-500/10 border-orange-500/60 text-orange-300' },
 };
 
 export const SECURITY_ASSIGNEE_ID = 'security';
@@ -52,10 +58,20 @@ const followUpsByIncident = new Map();
 const closuresByIncident = new Map();
 // Verifikasi tingkat temuan: { entries: [...], awaitingSecurityDecision: bool }.
 const verificationsByIncident = new Map();
+// Penutupan UNSOLVE oleh PIC Security: { id, at, actorName, comment, photoUrl, referencePhotoUrl }.
+const unsolvesByIncident = new Map();
+// Titik checkpoint asal temuan (kunci kapal|nama titik) agar halaman patroli tahu status temuannya.
+const checkpointKeyByIncident = new Map();
+// Foto acuan pengganti per titik setelah temuan Unsolve (dummy; nanti ke ships.customCheckpoints).
+const referenceOverridesByCheckpoint = new Map();
 const listeners = new Set();
 const EMPTY_LIST = Object.freeze([]);
 
+let storeVersion = 0;
+
 function emitChange() {
+  storeVersion += 1;
+  checkpointTemuanCache.clear();
   listeners.forEach((listener) => listener());
 }
 
@@ -89,6 +105,64 @@ export function useIncidentFollowUps(incidentId) {
   return useSyncExternalStore(subscribe, () => followUpsByIncident.get(key) || EMPTY_LIST);
 }
 
+export function useIncidentUnsolve(incidentId) {
+  const key = String(incidentId || '');
+  return useSyncExternalStore(subscribe, () => unsolvesByIncident.get(key) || null);
+}
+
+// Kunci titik = kapal + nama titik, sama seperti pemetaan definisi titik di PatrolPage.
+export function createCheckpointTemuanKey(shipKey, checkpointName) {
+  const ship = String(shipKey || '').trim();
+  const name = createCheckpointNameKey(checkpointName);
+  return ship && name ? `${ship}|${name}` : '';
+}
+
+function getIncidentCheckpointKey(incident) {
+  if (!incident?.isPatrol) return '';
+  return createCheckpointTemuanKey(incident.shipId || incident.shipName, incident.location);
+}
+
+// Dipanggil setiap aksi tindak lanjut agar store tahu titik asal temuan.
+export function rememberIncidentCheckpoint(incident) {
+  const incidentKey = String(incident?.id || '');
+  const checkpointKey = getIncidentCheckpointKey(incident);
+  if (!incidentKey || !checkpointKey || checkpointKeyByIncident.get(incidentKey) === checkpointKey) return;
+  checkpointKeyByIncident.set(incidentKey, checkpointKey);
+  emitChange();
+}
+
+const checkpointTemuanCache = new Map();
+const NO_CHECKPOINT_TEMUAN = Object.freeze({ hasOpenTemuan: false, openIncidentIds: EMPTY_LIST, override: null });
+
+// Status temuan (versi dummy) untuk satu titik: masih ada temuan berjalan (tombol AMAN disembunyikan)
+// dan foto acuan pengganti hasil Unsolve. Hanya temuan yang sudah masuk alur tindak lanjut dihitung.
+export function getCheckpointTemuanState(checkpointKey) {
+  if (!checkpointKey) return NO_CHECKPOINT_TEMUAN;
+  const cached = checkpointTemuanCache.get(checkpointKey);
+  if (cached) return cached;
+  const openIncidentIds = [];
+  checkpointKeyByIncident.forEach((key, incidentId) => {
+    if (key !== checkpointKey) return;
+    const hasFollowUps = (followUpsByIncident.get(incidentId) || EMPTY_LIST).length > 0;
+    if (hasFollowUps && !closuresByIncident.has(incidentId) && !unsolvesByIncident.has(incidentId)) openIncidentIds.push(incidentId);
+  });
+  const override = referenceOverridesByCheckpoint.get(checkpointKey) || null;
+  const state = openIncidentIds.length || override
+    ? { hasOpenTemuan: openIncidentIds.length > 0, openIncidentIds, override }
+    : NO_CHECKPOINT_TEMUAN;
+  checkpointTemuanCache.set(checkpointKey, state);
+  return state;
+}
+
+export function useCheckpointTemuanState(checkpointKey) {
+  return useSyncExternalStore(subscribe, () => getCheckpointTemuanState(checkpointKey));
+}
+
+// Versi daftar: satu langganan untuk semua titik di halaman patroli (snapshot stabil per versi store).
+export function useCheckpointTemuanVersion() {
+  return useSyncExternalStore(subscribe, () => storeVersion);
+}
+
 export function useIncidentClosure(incidentId) {
   const key = String(incidentId || '');
   return useSyncExternalStore(subscribe, () => closuresByIncident.get(key) || null);
@@ -118,6 +192,7 @@ function clearAwaitingSecurityDecision(incidentId) {
 
 export const INCIDENT_VERIFICATION_STATE = {
   NO_FOLLOW_UP: 'no_follow_up',
+  UNSOLVED: 'unsolved',
   IN_PROGRESS: 'in_progress',
   READY: 'ready',
   AWAITING_SECURITY: 'awaiting_security',
@@ -125,7 +200,8 @@ export const INCIDENT_VERIFICATION_STATE = {
 };
 
 // READY = semua tindak lanjut sudah Approved PIC Security → petugas pelapor verifikasi 1x.
-export function getIncidentVerificationState(followUps, verification, closure) {
+export function getIncidentVerificationState(followUps, verification, closure, unsolve = null) {
+  if (unsolve) return INCIDENT_VERIFICATION_STATE.UNSOLVED;
   if (closure) return INCIDENT_VERIFICATION_STATE.CLOSED;
   if (!followUps?.length) return INCIDENT_VERIFICATION_STATE.NO_FOLLOW_UP;
   if (verification?.awaitingSecurityDecision) return INCIDENT_VERIFICATION_STATE.AWAITING_SECURITY;
@@ -188,7 +264,7 @@ export function returnFollowUpToPic(incidentId, followUpId, { comment, actorName
 export function submitIncidentVerification(incidentId, { approved, comment, photoUrl, actorName }) {
   const key = String(incidentId || '');
   const followUps = followUpsByIncident.get(key) || EMPTY_LIST;
-  const state = getIncidentVerificationState(followUps, verificationsByIncident.get(key), closuresByIncident.get(key));
+  const state = getIncidentVerificationState(followUps, verificationsByIncident.get(key), closuresByIncident.get(key), unsolvesByIncident.get(key));
   if (state !== INCIDENT_VERIFICATION_STATE.READY) return { ok: false, closed: false };
 
   const entry = createEntry('verify', { actorName, actorRole: 'Petugas Pelapor', comment, photoUrl, verdict: approved ? 'approved' : 'rejected' });
@@ -212,8 +288,48 @@ export function requestReverification(incidentId, { comment, actorName }) {
   }));
 }
 
+// Foto yang menjadi acuan baru titik: evidence unsolve bila ada, selain itu foto temuan.
+export function getUnsolveReferencePhotoUrl(incident, evidencePhotoUrl) {
+  return evidencePhotoUrl || incident?.photoUrl || null;
+}
+
+// PIC Security menutup temuan sebagai UNSOLVE: semua tindak lanjut ditutup (status Unsolve), catatan
+// wajib, evidence opsional. Kondisi saat unsolve menjadi foto acuan baru titik checkpoint asal
+// temuan sehingga patroli berikutnya bisa melapor AMAN terhadap kondisi tersebut.
+// Mengembalikan { ok, referenceUpdated }.
+export function unsolveIncident(incident, { comment, photoUrl = null, actorName }) {
+  const key = String(incident?.id || '');
+  const note = String(comment || '').trim();
+  if (!key || !note || closuresByIncident.has(key) || unsolvesByIncident.has(key)) return { ok: false, referenceUpdated: false };
+
+  const at = new Date().toISOString();
+  const referencePhotoUrl = getUnsolveReferencePhotoUrl(incident, photoUrl);
+  const checkpointKey = getIncidentCheckpointKey(incident);
+  if (checkpointKey) checkpointKeyByIncident.set(key, checkpointKey);
+
+  updateIncidentFollowUps(key, (items) => items.map((item) => (
+    item.status === FOLLOW_UP_STATUS.DONE
+      ? item
+      : { ...item, status: FOLLOW_UP_STATUS.UNSOLVED, entries: [...item.entries, createEntry('unsolve', { actorName, actorRole: 'PIC Security', comment: note, at })] }
+  )));
+  unsolvesByIncident.set(key, { id: createId('fu-unsolve'), at, actorName, comment: note, photoUrl: photoUrl || null, referencePhotoUrl, checkpointKey });
+  const referenceUpdated = Boolean(checkpointKey && referencePhotoUrl);
+  if (referenceUpdated) {
+    referenceOverridesByCheckpoint.set(checkpointKey, {
+      referencePhotoUrl,
+      updatedAt: at,
+      incidentId: key,
+      note,
+      actorName,
+    });
+  }
+  emitChange();
+  return { ok: true, referenceUpdated };
+}
+
 // Contoh data agar keempat status bisa langsung dilihat tanpa menjalankan alur dari awal.
 export function seedDemoFollowUps(incident, { securityName }) {
+  rememberIncidentCheckpoint(incident);
   const minutesAgo = (minutes) => new Date(Date.now() - minutes * 60_000).toISOString();
   const entry = (kind, minutes, payload) => ({ ...createEntry(kind, payload), at: minutesAgo(minutes) });
   const fleet = getAssigneeMeta('fleet');
@@ -257,11 +373,24 @@ const ENTRY_LOG_LABEL = {
   update: 'mengirim update tindak lanjut',
   review: 'memberi feedback',
   return: 'mengembalikan tindak lanjut ke PIC',
+  unsolve: 'menutup tindak lanjut sebagai UNSOLVE',
 };
 
 // Bentuk log yang siap digabung dengan riwayat update temuan.
-export function buildFollowUpLogItems(followUps, securityName, closure = null, verification = null) {
+export function buildFollowUpLogItems(followUps, securityName, closure = null, verification = null, unsolve = null) {
   const logs = [];
+  if (unsolve) {
+    logs.push({
+      id: unsolve.id,
+      isFollowUpLog: true,
+      createdAt: unsolve.at,
+      author: unsolve.actorName,
+      tag: 'Temuan Unsolve',
+      headline: `PIC Security menutup temuan sebagai UNSOLVE${unsolve.referencePhotoUrl && unsolve.checkpointKey ? ' — foto kondisi awal titik diperbarui' : ''}`,
+      comment: unsolve.comment,
+      photoUrl: unsolve.photoUrl,
+    });
+  }
   if (closure) {
     logs.push({
       id: closure.id,

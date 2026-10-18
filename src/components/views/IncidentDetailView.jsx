@@ -11,8 +11,9 @@ import { useIncidents, useReports, useRole, useShips } from '../../context/AppCo
 import { ChevronDown, AlertTriangle, CheckCircle2, Camera, X, Plus, FileText, Trash2, Images, Pencil, Save, MapPin, ExternalLink } from 'lucide-react';
 import AsyncImage from '../AsyncImage';
 import { TimeAuditPills, TimeAuditRecordCard } from '../TimeAuditStatus';
-import { REPORTER_ROLE_ID, SECURITY_ASSIGNEE_ID, buildFollowUpLogItems, formatFollowUpTimestamp, useIncidentClosure, useIncidentFollowUps, useIncidentVerification } from '../incidentFollowUp/followUpStore';
-import { FollowUpAssignCard, FollowUpRoleSwitcher, FollowUpSectionList, FollowUpToast } from '../incidentFollowUp/FollowUpPanels';
+import { REPORTER_ROLE_ID, SECURITY_ASSIGNEE_ID, buildFollowUpLogItems, formatFollowUpTimestamp, useIncidentClosure, useIncidentFollowUps, useIncidentUnsolve, useIncidentVerification } from '../incidentFollowUp/followUpStore';
+import { CheckpointPatrolSimulation, FollowUpAssignCard, FollowUpRoleSwitcher, FollowUpSectionList, FollowUpToast } from '../incidentFollowUp/FollowUpPanels';
+import { createCheckpointNameKey, normalizeShipCheckpointDefinitions } from '../../utils/shipCheckpoints';
 
 function normalizeIncidentMetaKeyPart(value) {
   return String(value || '')
@@ -200,6 +201,7 @@ export default function IncidentDetailView({ isInline = false }) {
   const followUps = useIncidentFollowUps(selectedIncident?.id);
   const followUpClosure = useIncidentClosure(selectedIncident?.id);
   const followUpVerification = useIncidentVerification(selectedIncident?.id);
+  const followUpUnsolve = useIncidentUnsolve(selectedIncident?.id);
   const dismissFollowUpToast = useCallback(() => setFollowUpToast(null), []);
   const showFollowUpToast = useCallback((message) => setFollowUpToast({ id: Date.now(), message }), []);
 
@@ -229,8 +231,10 @@ export default function IncidentDetailView({ isInline = false }) {
     [incidentMeta, selectedIncident],
   );
   const showFollowUpFeature = !isSOSIncident;
-  // Penutupan temuan versi dummy (oleh petugas pelapor) ikut menandai status CLOSED di tampilan.
-  const isFollowUpClosed = showFollowUpFeature && Boolean(followUpClosure);
+  // Penutupan temuan versi dummy (Closed oleh petugas pelapor / Unsolve oleh PIC Security) ikut
+  // menandai temuan tertutup di tampilan.
+  const isFollowUpUnsolved = showFollowUpFeature && Boolean(followUpUnsolve);
+  const isFollowUpClosed = showFollowUpFeature && (Boolean(followUpClosure) || isFollowUpUnsolved);
   const incidentStatus = isFollowUpClosed ? 'closed' : getIncidentStatus(selectedIncident, incidentMetaRecord);
   const documentationItems = incidentMetaRecord?.documentation || [];
   const progressItems = incidentMetaRecord?.progress || [];
@@ -248,10 +252,10 @@ export default function IncidentDetailView({ isInline = false }) {
   const isIncidentClosed = incidentStatus === 'closed';
   const headerStatusLabel = isSOSIncident
     ? (isIncidentClosed ? 'SOS Resolved' : 'SOS Active')
-    : (isIncidentClosed ? 'Temuan Closed' : 'Temuan Open');
+    : (isFollowUpUnsolved ? 'Temuan Unsolve' : isIncidentClosed ? 'Temuan Closed' : 'Temuan Open');
   const headerStatusClass = isSOSIncident
     ? (isIncidentClosed ? 'text-rose-300/70' : 'text-rose-400')
-    : (isIncidentClosed ? 'text-slate-400' : 'text-yellow-400');
+    : (isFollowUpUnsolved ? 'text-orange-300' : isIncidentClosed ? 'text-slate-400' : 'text-yellow-400');
   const auditTitle = isSOSIncident ? 'Audit Timestamp SOS' : 'Audit Timestamp Temuan';
   const documentationGalleryItems = useMemo(
     () => getIncidentDocumentationGalleryItems(selectedIncident, documentationItems, progressItems),
@@ -263,6 +267,13 @@ export default function IncidentDetailView({ isInline = false }) {
   );
   const incidentMapsQuery = incidentMapConfig ? `${incidentMapConfig.lat},${incidentMapConfig.lng}` : '';
   const incidentMapsHref = incidentMapConfig ? `https://www.google.com/maps?q=${incidentMapsQuery}` : '#';
+  // Definisi titik asal temuan (foto acuan & NFC) untuk simulasi tap di titik tersebut.
+  const incidentCheckpointDefinition = useMemo(() => {
+    if (!selectedIncident.isPatrol) return null;
+    const ship = (shipsData || []).find((item) => item.id === selectedIncident.shipId || item.name === selectedIncident.shipName);
+    const nameKey = createCheckpointNameKey(selectedIncident.location);
+    return normalizeShipCheckpointDefinitions(ship?.customCheckpoints).find((item) => createCheckpointNameKey(item.name) === nameKey) || null;
+  }, [selectedIncident, shipsData]);
   const followUpSecurityName = (isPic && currentUserRecord?.name) || 'PIC Security';
   const followUpReporterName = selectedIncident.reportedBy || 'Petugas Pelapor';
   // Update riwayat temuan hanya untuk Petugas Pelapor & PIC Security (role simulasi); SOS tetap ikut izin asli.
@@ -270,7 +281,7 @@ export default function IncidentDetailView({ isInline = false }) {
     && (!showFollowUpFeature || followUpSimRole === SECURITY_ASSIGNEE_ID || followUpSimRole === REPORTER_ROLE_ID);
   const historyItems = mergeIncidentHistoryItems(
     progressItems,
-    showFollowUpFeature ? buildFollowUpLogItems(followUps, followUpSecurityName, followUpClosure, followUpVerification) : [],
+    showFollowUpFeature ? buildFollowUpLogItems(followUps, followUpSecurityName, followUpClosure, followUpVerification, followUpUnsolve) : [],
   );
 
   const saveIncidentInfo = () => {
@@ -537,6 +548,7 @@ export default function IncidentDetailView({ isInline = false }) {
                 simRole={followUpSimRole}
                 securityName={followUpSecurityName}
                 isClosed={isFollowUpClosed}
+                isUnsolved={isFollowUpUnsolved}
                 onToast={showFollowUpToast}
                 onOpenUpdateTab={() => setActiveTab('update')}
               />
@@ -592,10 +604,19 @@ export default function IncidentDetailView({ isInline = false }) {
                 followUps={followUps}
                 verification={followUpVerification}
                 closure={followUpClosure}
+                unsolve={followUpUnsolve}
                 simRole={followUpSimRole}
                 securityName={followUpSecurityName}
                 reporterName={followUpReporterName}
                 isClosed={isFollowUpClosed}
+                onToast={showFollowUpToast}
+                onPreviewPhoto={setPreviewPhoto}
+              />
+            )}
+            {showFollowUpFeature && (
+              <CheckpointPatrolSimulation
+                incident={selectedIncident}
+                definition={incidentCheckpointDefinition}
                 onToast={showFollowUpToast}
                 onPreviewPhoto={setPreviewPhoto}
               />

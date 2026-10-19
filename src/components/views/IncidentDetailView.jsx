@@ -12,8 +12,7 @@ import { ChevronDown, AlertTriangle, CheckCircle2, Camera, X, Plus, FileText, Tr
 import AsyncImage from '../AsyncImage';
 import { TimeAuditPills, TimeAuditRecordCard } from '../TimeAuditStatus';
 import { REPORTER_ROLE_ID, SECURITY_ASSIGNEE_ID, buildFollowUpLogItems, formatFollowUpTimestamp, useIncidentClosure, useIncidentFollowUps, useIncidentUnsolve, useIncidentVerification } from '../incidentFollowUp/followUpStore';
-import { CheckpointPatrolSimulation, FollowUpAssignCard, FollowUpRoleSwitcher, FollowUpSectionList, FollowUpToast } from '../incidentFollowUp/FollowUpPanels';
-import { createCheckpointNameKey, normalizeShipCheckpointDefinitions } from '../../utils/shipCheckpoints';
+import { FollowUpAssignCard, FollowUpRoleSwitcher, FollowUpSectionList, FollowUpToast } from '../incidentFollowUp/FollowUpPanels';
 
 function normalizeIncidentMetaKeyPart(value) {
   return String(value || '')
@@ -187,7 +186,7 @@ export default function IncidentDetailView({ isInline = false }) {
     setNewProgress, handlePhotoProgress, handleUpdateIncidentPhoto, handleAddIncidentDocumentation,
     handleUpdateIncidentInfo,
   } = useIncidents();
-  const { isAdmin, isPic, currentUserRecord } = useRole();
+  const { isAdmin, isPic, isPetugas, currentUserRecord } = useRole();
   const { setPreviewPhoto } = useReports();
   const { shipsData } = useShips();
 
@@ -196,7 +195,7 @@ export default function IncidentDetailView({ isInline = false }) {
   const [activeInfoEditor, setActiveInfoEditor] = useState(null);
   const [incidentInfoForm, setIncidentInfoForm] = useState(() => createIncidentInfoState(null));
   const [isHeaderExpanded, setIsHeaderExpanded] = useState(false);
-  const [followUpSimRole, setFollowUpSimRole] = useState(SECURITY_ASSIGNEE_ID);
+  const [followUpSimRole, setFollowUpSimRole] = useState(isPetugas ? REPORTER_ROLE_ID : SECURITY_ASSIGNEE_ID);
   const [followUpToast, setFollowUpToast] = useState(null);
   const followUps = useIncidentFollowUps(selectedIncident?.id);
   const followUpClosure = useIncidentClosure(selectedIncident?.id);
@@ -210,6 +209,15 @@ export default function IncidentDetailView({ isInline = false }) {
     setActiveInfoEditor(null);
     setIsHeaderExpanded(false);
   }, [selectedIncident?.id]);
+
+  // Dibuka dari tap checkpoint "Update Temuan": langsung ke form update riwayat sebagai Petugas.
+  const updateIntentAt = selectedIncident?.patrolUpdateIntentAt;
+  useEffect(() => {
+    if (!updateIntentAt) return;
+    setActiveTab('update');
+    setFollowUpSimRole(REPORTER_ROLE_ID);
+    setShowUpdateForm(true);
+  }, [updateIntentAt]);
 
   if (!selectedIncident) {
     if (isInline) return (
@@ -267,18 +275,11 @@ export default function IncidentDetailView({ isInline = false }) {
   );
   const incidentMapsQuery = incidentMapConfig ? `${incidentMapConfig.lat},${incidentMapConfig.lng}` : '';
   const incidentMapsHref = incidentMapConfig ? `https://www.google.com/maps?q=${incidentMapsQuery}` : '#';
-  // Definisi titik asal temuan (foto acuan & NFC) untuk simulasi tap di titik tersebut.
-  const incidentCheckpointDefinition = useMemo(() => {
-    if (!selectedIncident.isPatrol) return null;
-    const ship = (shipsData || []).find((item) => item.id === selectedIncident.shipId || item.name === selectedIncident.shipName);
-    const nameKey = createCheckpointNameKey(selectedIncident.location);
-    return normalizeShipCheckpointDefinitions(ship?.customCheckpoints).find((item) => createCheckpointNameKey(item.name) === nameKey) || null;
-  }, [selectedIncident, shipsData]);
   const followUpSecurityName = (isPic && currentUserRecord?.name) || 'PIC Security';
   const followUpReporterName = selectedIncident.reportedBy || 'Petugas Pelapor';
-  // Update riwayat temuan hanya untuk Petugas Pelapor & PIC Security (role simulasi); SOS tetap ikut izin asli.
+  // Tambah update riwayat temuan hanya untuk Petugas (role simulasi); SOS tetap ikut izin asli.
   const canAddHistoryUpdate = canManageDetailActions
-    && (!showFollowUpFeature || followUpSimRole === SECURITY_ASSIGNEE_ID || followUpSimRole === REPORTER_ROLE_ID);
+    && (!showFollowUpFeature || followUpSimRole === REPORTER_ROLE_ID);
   const historyItems = mergeIncidentHistoryItems(
     progressItems,
     showFollowUpFeature ? buildFollowUpLogItems(followUps, followUpSecurityName, followUpClosure, followUpVerification, followUpUnsolve) : [],
@@ -613,14 +614,6 @@ export default function IncidentDetailView({ isInline = false }) {
                 onPreviewPhoto={setPreviewPhoto}
               />
             )}
-            {showFollowUpFeature && (
-              <CheckpointPatrolSimulation
-                incident={selectedIncident}
-                definition={incidentCheckpointDefinition}
-                onToast={showFollowUpToast}
-                onPreviewPhoto={setPreviewPhoto}
-              />
-            )}
 
             <div className="pt-2">
               <div className="mb-4 flex items-center justify-between gap-3">
@@ -630,7 +623,7 @@ export default function IncidentDetailView({ isInline = false }) {
                     type="button"
                     onClick={() => setShowUpdateForm(true)}
                     disabled={!canAddHistoryUpdate}
-                    title={canAddHistoryUpdate ? 'Tambah update' : 'Hanya Petugas Pelapor dan PIC Security yang dapat menambah update'}
+                    title={canAddHistoryUpdate ? 'Tambah update' : 'Hanya Petugas yang dapat menambah update'}
                     className="px-3 py-1.5 bg-emerald-600/10 border border-emerald-500/30 text-emerald-400 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 hover:bg-emerald-600 hover:text-white transition-all active:scale-95 disabled:opacity-40 disabled:hover:bg-emerald-600/10 disabled:hover:text-emerald-400 disabled:cursor-not-allowed"
                   >
                     <Plus className="w-3.5 h-3.5" /> Update

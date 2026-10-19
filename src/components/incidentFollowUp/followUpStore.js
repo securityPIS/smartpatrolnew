@@ -4,12 +4,12 @@ Tujuan: Store dummy (in-memory, tanpa database) untuk alur tindak lanjut temuan:
         untuk seluruh temuan setelah semua tindak lanjut di-approve. PIC Security juga bisa menutup
         temuan sebagai UNSOLVE (tidak bisa diselesaikan) → kondisi saat unsolve menjadi foto acuan
         baru titik checkpoint dan tombol AMAN muncul lagi di titik tersebut.
-Caller: Komponen di folder incidentFollowUp, IncidentDetailView, PatrolPage, PatrolNfcChoiceSheet.
+Caller: Komponen di folder incidentFollowUp, IncidentDetailView, PatrolPage.
 Dependensi: React useSyncExternalStore, followUpPdf (nama file dokumen), shipCheckpoints (kunci nama).
 Main Functions: useIncidentFollowUps, useIncidentVerification, getIncidentVerificationState,
                 assignFollowUp, submitFollowUpUpdate, submitSecurityReview, returnFollowUpToPic,
                 submitIncidentVerification, requestReverification, unsolveIncident,
-                useCheckpointTemuanState, seedDemoFollowUps.
+                isPatrolTemuanOpen, getCheckpointReferenceOverride, seedDemoFollowUps.
 Side Effects: Hanya state modul di memori; hilang saat aplikasi di-restart (sengaja, versi tampilan).
 */
 
@@ -60,8 +60,6 @@ const closuresByIncident = new Map();
 const verificationsByIncident = new Map();
 // Penutupan UNSOLVE oleh PIC Security: { id, at, actorName, comment, photoUrl, referencePhotoUrl }.
 const unsolvesByIncident = new Map();
-// Titik checkpoint asal temuan (kunci kapal|nama titik) agar halaman patroli tahu status temuannya.
-const checkpointKeyByIncident = new Map();
 // Foto acuan pengganti per titik setelah temuan Unsolve (dummy; nanti ke ships.customCheckpoints).
 const referenceOverridesByCheckpoint = new Map();
 const listeners = new Set();
@@ -71,7 +69,6 @@ let storeVersion = 0;
 
 function emitChange() {
   storeVersion += 1;
-  checkpointTemuanCache.clear();
   listeners.forEach((listener) => listener());
 }
 
@@ -117,49 +114,26 @@ export function createCheckpointTemuanKey(shipKey, checkpointName) {
   return ship && name ? `${ship}|${name}` : '';
 }
 
-function getIncidentCheckpointKey(incident) {
+export function getIncidentCheckpointKey(incident) {
   if (!incident?.isPatrol) return '';
   return createCheckpointTemuanKey(incident.shipId || incident.shipName, incident.location);
 }
 
-// Dipanggil setiap aksi tindak lanjut agar store tahu titik asal temuan.
-export function rememberIncidentCheckpoint(incident) {
-  const incidentKey = String(incident?.id || '');
-  const checkpointKey = getIncidentCheckpointKey(incident);
-  if (!incidentKey || !checkpointKey || checkpointKeyByIncident.get(incidentKey) === checkpointKey) return;
-  checkpointKeyByIncident.set(incidentKey, checkpointKey);
-  emitChange();
+// Temuan patroli dianggap masih OPEN di titiknya selama belum Closed (status meta asli, atau
+// verifikasi petugas di store dummy) dan belum ditetapkan Unsolve oleh PIC Security.
+export function isPatrolTemuanOpen(incident, metaStatus) {
+  if (!incident?.isPatrol || incident.isSOS || metaStatus === 'closed') return false;
+  const key = String(incident.id || '');
+  return !closuresByIncident.has(key) && !unsolvesByIncident.has(key);
 }
 
-const checkpointTemuanCache = new Map();
-const NO_CHECKPOINT_TEMUAN = Object.freeze({ hasOpenTemuan: false, openIncidentIds: EMPTY_LIST, override: null });
-
-// Status temuan (versi dummy) untuk satu titik: masih ada temuan berjalan (tombol AMAN disembunyikan)
-// dan foto acuan pengganti hasil Unsolve. Hanya temuan yang sudah masuk alur tindak lanjut dihitung.
-export function getCheckpointTemuanState(checkpointKey) {
-  if (!checkpointKey) return NO_CHECKPOINT_TEMUAN;
-  const cached = checkpointTemuanCache.get(checkpointKey);
-  if (cached) return cached;
-  const openIncidentIds = [];
-  checkpointKeyByIncident.forEach((key, incidentId) => {
-    if (key !== checkpointKey) return;
-    const hasFollowUps = (followUpsByIncident.get(incidentId) || EMPTY_LIST).length > 0;
-    if (hasFollowUps && !closuresByIncident.has(incidentId) && !unsolvesByIncident.has(incidentId)) openIncidentIds.push(incidentId);
-  });
-  const override = referenceOverridesByCheckpoint.get(checkpointKey) || null;
-  const state = openIncidentIds.length || override
-    ? { hasOpenTemuan: openIncidentIds.length > 0, openIncidentIds, override }
-    : NO_CHECKPOINT_TEMUAN;
-  checkpointTemuanCache.set(checkpointKey, state);
-  return state;
+// Foto acuan pengganti hasil Unsolve untuk satu titik (null bila tidak ada).
+export function getCheckpointReferenceOverride(checkpointKey) {
+  return (checkpointKey && referenceOverridesByCheckpoint.get(checkpointKey)) || null;
 }
 
-export function useCheckpointTemuanState(checkpointKey) {
-  return useSyncExternalStore(subscribe, () => getCheckpointTemuanState(checkpointKey));
-}
-
-// Versi daftar: satu langganan untuk semua titik di halaman patroli (snapshot stabil per versi store).
-export function useCheckpointTemuanVersion() {
+// Satu langganan untuk halaman patroli: berubah setiap kali store berubah (Closed/Unsolve/override).
+export function useFollowUpStoreVersion() {
   return useSyncExternalStore(subscribe, () => storeVersion);
 }
 
@@ -305,7 +279,6 @@ export function unsolveIncident(incident, { comment, photoUrl = null, actorName 
   const at = new Date().toISOString();
   const referencePhotoUrl = getUnsolveReferencePhotoUrl(incident, photoUrl);
   const checkpointKey = getIncidentCheckpointKey(incident);
-  if (checkpointKey) checkpointKeyByIncident.set(key, checkpointKey);
 
   updateIncidentFollowUps(key, (items) => items.map((item) => (
     item.status === FOLLOW_UP_STATUS.DONE
@@ -329,7 +302,6 @@ export function unsolveIncident(incident, { comment, photoUrl = null, actorName 
 
 // Contoh data agar keempat status bisa langsung dilihat tanpa menjalankan alur dari awal.
 export function seedDemoFollowUps(incident, { securityName }) {
-  rememberIncidentCheckpoint(incident);
   const minutesAgo = (minutes) => new Date(Date.now() - minutes * 60_000).toISOString();
   const entry = (kind, minutes, payload) => ({ ...createEntry(kind, payload), at: minutesAgo(minutes) });
   const fleet = getAssigneeMeta('fleet');

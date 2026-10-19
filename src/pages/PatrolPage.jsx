@@ -12,7 +12,7 @@ import { getTrustedTimeSnapshot, subscribeTrustedTime } from '../services/time/t
 import { summarizeTimeAudit } from '../services/time/timeAudit';
 import {
   CheckCircle2, AlertTriangle, Search, Ship, MapPin, ExternalLink, ArrowLeft, Plus,
-  CalendarDays, Thermometer, Wind, FileText, CircleOff, TimerReset, Clock, Nfc, CornerDownRight, ShieldAlert, Settings,
+  CalendarDays, Thermometer, Wind, FileText, CircleOff, TimerReset, Clock, Nfc, CornerDownRight, Settings,
   ImageIcon,
 } from 'lucide-react';
 import CheckpointGroupToggle, { useCollapsedGroups } from '../components/CheckpointGroupToggle';
@@ -20,7 +20,9 @@ import PatrolNfcChoiceSheet from '../components/modals/PatrolNfcChoiceSheet';
 import { usePatrolNfcScan } from '../hooks/usePatrolNfcScan';
 import { openNfcSettings } from '../services/native/nfc';
 import { createCheckpointNameKey, normalizeShipCheckpointDefinitions } from '../utils/shipCheckpoints';
-import { createCheckpointTemuanKey, getCheckpointTemuanState, useCheckpointTemuanVersion } from '../components/incidentFollowUp/followUpStore';
+import {
+  createCheckpointTemuanKey, getCheckpointReferenceOverride, getIncidentCheckpointKey, isPatrolTemuanOpen, useFollowUpStoreVersion,
+} from '../components/incidentFollowUp/followUpStore';
 import AsyncImage from '../components/AsyncImage';
 import HistoryDetailView from '../components/views/HistoryDetailView';
 import ShiftStatusModal from '../components/modals/ShiftStatusModal';
@@ -169,7 +171,7 @@ const PatrolPage = React.memo(function PatrolPage() {
   const { weatherInfo, weatherLoading, getWeatherDetail } = useWeather();
   const { setPreviewPhoto, selectedReportDetail } = useReports();
   const { selectedHistoryEntry, closeHistoryEntry } = useHistory();
-  const { selectedIncident } = useIncidents();
+  const { selectedIncident, setSelectedIncident, allIncidents, incidentMeta } = useIncidents();
   const trustedTime = React.useSyncExternalStore(
     subscribeTrustedTime,
     getTrustedTimeSnapshot,
@@ -215,17 +217,33 @@ const PatrolPage = React.memo(function PatrolPage() {
     item?.isTemporaryShiftNode ? null : definitionByNameKey.get(createCheckpointNameKey(item?.name)) || null
   ), [definitionByNameKey]);
 
-  // Status temuan per titik (store tindak lanjut dummy): temuan berjalan menyembunyikan AMAN,
-  // temuan Unsolve mengganti foto acuan dengan kondisi saat unsolve.
-  const checkpointTemuanVersion = useCheckpointTemuanVersion();
-  const temuanShipKey = operationalShip?.id || operationalShipName || '';
-  const getTemuanStateForItem = React.useCallback((item) => (
-    isHistoryMode || item?.isTemporaryShiftNode
-      ? getCheckpointTemuanState('')
-      : getCheckpointTemuanState(createCheckpointTemuanKey(temuanShipKey, item?.name))
-  ), [isHistoryMode, temuanShipKey, checkpointTemuanVersion]);
+  // Status temuan per titik: temuan patroli yang belum Closed/Unsolve = OPEN (pilihan jadi Temuan
+  // Baru / Update Temuan), temuan Unsolve mengganti foto acuan dengan kondisi saat unsolve.
+  const followUpStoreVersion = useFollowUpStoreVersion();
+  const openTemuanByCheckpointKey = React.useMemo(() => {
+    const collection = new Map();
+    if (isHistoryMode) return collection;
+    ensureArray(allIncidents).forEach((incident) => {
+      if (!isPatrolTemuanOpen(incident, incidentMeta?.[incident.id]?.status)) return;
+      const key = getIncidentCheckpointKey(incident);
+      if (key) collection.set(key, [...(collection.get(key) || []), incident]);
+    });
+    return collection;
+  }, [allIncidents, incidentMeta, isHistoryMode, followUpStoreVersion]);
+  const getTemuanStateForItem = React.useCallback((item) => {
+    if (isHistoryMode || !item) return { openTemuan: [], override: null };
+    // Temuan lama bisa menyimpan id kapal atau hanya nama kapal → cek keduanya.
+    const keys = Array.from(new Set([
+      createCheckpointTemuanKey(operationalShip?.id, item.name),
+      createCheckpointTemuanKey(operationalShipName, item.name),
+    ].filter(Boolean)));
+    return {
+      openTemuan: keys.flatMap(key => openTemuanByCheckpointKey.get(key) || []),
+      override: keys.map(getCheckpointReferenceOverride).find(Boolean) || null,
+    };
+  }, [isHistoryMode, openTemuanByCheckpointKey, operationalShip?.id, operationalShipName, followUpStoreVersion]);
   const getReferencePhotoForItem = React.useCallback((item, definition) => {
-    const override = getTemuanStateForItem(item).override;
+    const { override } = getTemuanStateForItem(item);
     return override?.referencePhotoUrl
       ? { url: override.referencePhotoUrl, isUnsolve: true }
       : { url: definition?.referencePhotoUrl || null, isUnsolve: false };
@@ -251,7 +269,7 @@ const PatrolPage = React.memo(function PatrolPage() {
   const handleNfcChoice = React.useCallback((type) => {
     const selection = nfcSelection;
     if (!selection) return;
-    if (type === 'aman' && getTemuanStateForItem(selection.item).hasOpenTemuan) return;
+    if (type === 'aman' && getTemuanStateForItem(selection.item).openTemuan.length > 0) return;
     setNfcSelection(null);
     handleActionClick(selection.item.id, type, selection.verified
       ? {
@@ -261,6 +279,12 @@ const PatrolPage = React.memo(function PatrolPage() {
       }
       : null);
   }, [getReferencePhotoForItem, getTemuanStateForItem, handleActionClick, nfcSelection]);
+
+  // "Update Temuan": buka detail temuan open di titik ini langsung ke form update riwayat (Petugas).
+  const handleUpdateOpenTemuan = React.useCallback((incident) => {
+    setNfcSelection(null);
+    setSelectedIncident({ ...incident, patrolUpdateIntentAt: Date.now() });
+  }, [setSelectedIncident]);
 
   // Kelompokkan item patroli: main diikuti sub-nya (urutan definisi sudah main → sub). Sub yang
   // induknya tidak ikut tampil (mis. tersaring pencarian) dirender sendiri dengan label induk.
@@ -286,23 +310,16 @@ const PatrolPage = React.memo(function PatrolPage() {
     const definition = getDefinitionForItem(item);
     const referencePhoto = getReferencePhotoForItem(item, definition);
     if (item.status === 'completed') return renderSummaryListItem(item, { referencePhoto });
-    const { hasOpenTemuan } = getTemuanStateForItem(item);
-
-    const hasNfc = Boolean(definition?.nfcTagId);
+    const hasOpenTemuan = getTemuanStateForItem(item).openTemuan.length > 0;
     // Label induk hanya untuk sub yang tampil di luar kelompok main-nya.
     const parentName = standalone && definition?.type === 'sub' ? definitionById.get(definition.parentId)?.name : '';
-    // Titik ber-NFC hanya bisa dilaporkan lewat tap NFC. Titik tanpa NFC (titik tambahan
-    // shift / belum didaftarkan admin) tetap bisa dibuka manual agar patroli tidak macet.
-    const canOpenManually = !hasNfc && !isCheckpointLocked;
+    // Laporan titik lewat tap NFC asli; tombol Simulasi Tap meniru tap tersebut (tanpa verifikasi NFC).
+    const canSimulateTap = !isCheckpointLocked;
 
     return (
       <div
         key={item.id}
-        role={canOpenManually ? 'button' : undefined}
-        tabIndex={canOpenManually ? 0 : undefined}
-        onClick={canOpenManually ? () => setNfcSelection({ item, definition, verified: false }) : undefined}
-        onKeyDown={canOpenManually ? (event) => { if (event.key === 'Enter') setNfcSelection({ item, definition, verified: false }); } : undefined}
-        className={`p-3 bg-[#0b1229] border rounded-xl transition-all ${definition?.type === 'sub' ? 'border-sky-900/60' : 'border-cyan-800/50'} ${canOpenManually ? 'cursor-pointer hover:border-amber-500/40' : ''}`}
+        className={`p-3 bg-[#0b1229] border rounded-xl transition-all ${definition?.type === 'sub' ? 'border-sky-900/60' : 'border-cyan-800/50'}`}
       >
         <div className="flex items-center justify-between gap-2">
           <div className="flex-1 min-w-0">
@@ -320,7 +337,7 @@ const PatrolPage = React.memo(function PatrolPage() {
             {(hasOpenTemuan || referencePhoto.isUnsolve) && (
               <div className="flex flex-wrap gap-1 mt-1">
                 {hasOpenTemuan && (
-                  <span className="text-[9px] uppercase tracking-widest text-yellow-300 border border-yellow-500/40 px-1.5 py-0.5 rounded" title="Temuan masih dalam tindak lanjut">Temuan Open</span>
+                  <span className="text-[9px] uppercase tracking-widest text-yellow-300 border border-yellow-500/40 px-1.5 py-0.5 rounded" title="Masih ada temuan yang belum Closed/Unsolve">Temuan Open</span>
                 )}
                 {referencePhoto.isUnsolve && (
                   <span className="text-[9px] uppercase tracking-widest text-orange-300 border border-orange-500/40 px-1.5 py-0.5 rounded" title="Foto acuan diperbarui dari temuan Unsolve">Acuan Unsolve</span>
@@ -330,15 +347,16 @@ const PatrolPage = React.memo(function PatrolPage() {
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             {renderReferencePhotoButton(item, referencePhoto)}
-            {hasNfc ? (
-              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[10px] font-bold uppercase tracking-wider ${isCheckpointLocked ? 'border-slate-800 text-slate-500' : 'border-cyan-600/50 bg-cyan-500/10 text-cyan-200'}`}>
-                <Nfc className="w-3.5 h-3.5" /> Tap NFC
-              </span>
-            ) : (
-              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[10px] font-bold uppercase tracking-wider ${isCheckpointLocked ? 'border-slate-800 text-slate-500' : 'border-amber-600/40 text-amber-300'}`}>
-                <ShieldAlert className="w-3.5 h-3.5" /> Tanpa NFC
-              </span>
-            )}
+            <button
+              type="button"
+              disabled={!canSimulateTap}
+              onClick={() => setNfcSelection({ item, definition, verified: false, simulated: true })}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-fuchsia-500/40 bg-fuchsia-500/10 text-fuchsia-200 hover:bg-fuchsia-500/20 transition-colors disabled:border-slate-800 disabled:bg-transparent disabled:text-slate-500"
+              aria-label={`Simulasi tap NFC di ${item.name}`}
+            >
+              <Nfc className="w-3.5 h-3.5" />
+              <span className="text-[10px] font-bold uppercase tracking-wider">Simulasi Tap</span>
+            </button>
           </div>
         </div>
       </div>
@@ -754,9 +772,11 @@ const PatrolPage = React.memo(function PatrolPage() {
        {nfcSelection && (
          <PatrolNfcChoiceSheet
            selection={nfcSelection}
-           temuanState={getTemuanStateForItem(nfcSelection.item)}
+           openTemuan={getTemuanStateForItem(nfcSelection.item).openTemuan}
+           referenceOverride={getTemuanStateForItem(nfcSelection.item).override}
            parentName={nfcSelection.definition?.type === 'sub' ? definitionById.get(nfcSelection.definition.parentId)?.name : ''}
            onChoose={handleNfcChoice}
+           onUpdateTemuan={handleUpdateOpenTemuan}
            onClose={() => setNfcSelection(null)}
            onPreviewPhoto={(url) => setPreviewPhoto({ url, author: `Foto acuan · ${nfcSelection.item.name}` })}
          />

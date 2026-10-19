@@ -12,7 +12,6 @@ Side Effects: Mengubah store dummy di memori dan membuka PDF; tidak menyentuh da
 import React, { useEffect, useRef, useState } from 'react';
 import { Ban, Camera, CheckCircle2, ChevronDown, ClipboardList, Eye, FileText, ImageIcon, RotateCcw, Send, ShieldAlert, ShieldCheck, UserCheck, X, XCircle } from 'lucide-react';
 import AsyncImage from '../AsyncImage';
-import PatrolNfcChoiceSheet from '../modals/PatrolNfcChoiceSheet';
 import {
   FOLLOW_UP_STATUS,
   FOLLOW_UP_STATUS_META,
@@ -21,12 +20,10 @@ import {
   REPORTER_ROLE_ID,
   SECURITY_ASSIGNEE_ID,
   assignFollowUp,
-  createCheckpointTemuanKey,
   formatFollowUpTimestamp,
   getAssigneeMeta,
   getIncidentVerificationState,
   getUnsolveReferencePhotoUrl,
-  rememberIncidentCheckpoint,
   requestReverification,
   returnFollowUpToPic,
   seedDemoFollowUps,
@@ -34,7 +31,6 @@ import {
   submitIncidentVerification,
   submitSecurityReview,
   unsolveIncident,
-  useCheckpointTemuanState,
 } from './followUpStore';
 import { buildFollowUpPdfFileName, openFollowUpPdf } from './followUpPdf';
 
@@ -245,7 +241,6 @@ function AssignFollowUpModal({ incident, securityName, nextSequence, onClose, on
 
   const handleSubmit = () => {
     if (!canSubmit) return;
-    rememberIncidentCheckpoint(incident);
     assignFollowUp(incident.id, {
       assigneeId,
       instruction: instruction.trim(),
@@ -992,46 +987,6 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
             closeAction();
             onToast(`Permintaan verifikasi ulang dikirim ke petugas pelapor (${reporterName}).`);
           }}
-        />
-      )}
-    </div>
-  );
-}
-
-// Simulasi (dummy) tampilan petugas saat tap NFC di titik asal temuan: memperlihatkan efek status
-// temuan pada titik — AMAN tersembunyi selama tindak lanjut berjalan, foto acuan & AMAN setelah Unsolve.
-export function CheckpointPatrolSimulation({ incident, definition, onToast, onPreviewPhoto }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const temuanState = useCheckpointTemuanState(createCheckpointTemuanKey(incident?.shipId || incident?.shipName, incident?.location));
-  if (!incident?.isPatrol || !incident.location) return null;
-
-  const statusText = temuanState.override
-    ? 'Foto acuan diperbarui (Unsolve) · tombol AMAN tersedia'
-    : temuanState.hasOpenTemuan
-      ? 'Temuan berjalan · tombol AMAN disembunyikan'
-      : 'Tombol AMAN & TEMUAN tersedia';
-
-  return (
-    <div className="rounded-xl border border-fuchsia-900/50 bg-[#0b1229]/60 p-3.5 flex items-center gap-3">
-      <div className="flex-1 min-w-0">
-        <p className="text-xs font-bold text-fuchsia-300 uppercase tracking-widest">Titik {incident.location}</p>
-        <p className="text-[10px] text-cyan-600 mt-0.5">{statusText}</p>
-      </div>
-      <button type="button" onClick={() => setIsOpen(true)} className="shrink-0 px-3 py-2 rounded-xl border border-fuchsia-500/40 text-fuchsia-200 hover:bg-fuchsia-500/10 transition-all">
-        <span className="text-[10px] font-black uppercase tracking-widest">Simulasi Tap</span>
-      </button>
-      {isOpen && (
-        <PatrolNfcChoiceSheet
-          selection={{ item: { id: `sim-${incident.id}`, name: incident.location }, definition, verified: Boolean(definition?.nfcTagId) }}
-          temuanState={temuanState}
-          zIndexClass="z-[115]"
-          simulationLabel="Simulasi tampilan petugas patroli"
-          onChoose={(type) => {
-            setIsOpen(false);
-            onToast(`Simulasi: petugas memilih ${type === 'aman' ? 'AMAN' : 'TEMUAN'} di titik ${incident.location}. (Tidak membuat laporan)`);
-          }}
-          onClose={() => setIsOpen(false)}
-          onPreviewPhoto={(url) => onPreviewPhoto({ url, author: `Foto acuan · ${incident.location}` })}
         />
       )}
     </div>

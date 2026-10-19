@@ -72,7 +72,10 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
   menutup semua tindak lanjut (status Unsolve), catatan wajib, evidence opsional. Temuan bukan Aman
   bukan Closed. Kondisi saat unsolve (evidence, atau foto temuan bila kosong) jadi foto acuan baru
   titik (`referenceOverridesByCheckpoint`, kunci `shipId|nama titik`).
-- Patroli (`PatrolPage` + `PatrolNfcChoiceSheet`): titik dengan temuan yang masih berjalan di alur
-  tindak lanjut → tombol AMAN disembunyikan; setelah Closed/Unsolve AMAN muncul lagi, foto acuan pakai
-  override Unsolve. `CheckpointPatrolSimulation` (tab Update) = pratinjau tap NFC untuk simulasi.
+- Patroli (`PatrolPage` + `PatrolNfcChoiceSheet`): temuan patroli di titik (kapal+nama) yang belum
+  Closed/Unsolve = OPEN (`isPatrolTemuanOpen`) → pilihan tap jadi TEMUAN BARU / UPDATE TEMUAN (berlaku
+  juga untuk tap NFC asli). Update Temuan membuka detail temuan (`patrolUpdateIntentAt`) langsung ke form
+  update riwayat sebagai Petugas. Tanpa temuan open → AMAN/TEMUAN, foto acuan pakai override Unsolve.
+- Item checkpoint pending tidak lagi punya badge "Tap NFC"/"Tanpa NFC"; diganti tombol "Simulasi Tap"
+  (buka sheet tanpa verifikasi NFC). Tombol "+ Update" Riwayat Update hanya untuk role Petugas.
 - Store masih dummy in-memory (belum ke database).

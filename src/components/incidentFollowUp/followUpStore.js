@@ -1,14 +1,14 @@
 /*
 Tujuan: Store dummy (in-memory, tanpa database) untuk alur tindak lanjut temuan: assign PIC fungsi,
-        update PIC fungsi, feedback/approve PIC Security, lalu SATU kali verifikasi petugas pelapor
-        untuk seluruh temuan setelah semua tindak lanjut di-approve. PIC Security juga bisa menutup
-        temuan sebagai UNSOLVE (tidak bisa diselesaikan) → kondisi saat unsolve menjadi foto acuan
-        baru titik checkpoint dan tombol AMAN muncul lagi di titik tersebut.
+        update PIC fungsi, feedback/approve PIC Security. Setelah SEMUA tindak lanjut di-approve,
+        PIC Security memilih UNSOLVE (temuan tidak bisa diselesaikan → kondisi saat unsolve jadi foto
+        acuan baru titik) atau NEED VERIFICATION (minta petugas security memverifikasi, atau PIC
+        Security memverifikasi sendiri). Verifikasi sesuai → temuan Closed.
 Caller: Komponen di folder incidentFollowUp, IncidentDetailView, PatrolPage.
 Dependensi: React useSyncExternalStore, followUpPdf (nama file dokumen), shipCheckpoints (kunci nama).
 Main Functions: useIncidentFollowUps, useIncidentVerification, getIncidentVerificationState,
                 assignFollowUp, submitFollowUpUpdate, submitSecurityReview, returnFollowUpToPic,
-                submitIncidentVerification, requestReverification, unsolveIncident,
+                requestIncidentVerification, submitIncidentVerification, requestReverification, unsolveIncident,
                 isPatrolTemuanOpen, getCheckpointReferenceOverride, seedDemoFollowUps.
 Side Effects: Hanya state modul di memori; hilang saat aplikasi di-restart (sengaja, versi tampilan).
 */
@@ -142,7 +142,8 @@ export function useIncidentClosure(incidentId) {
   return useSyncExternalStore(subscribe, () => closuresByIncident.get(key) || null);
 }
 
-const EMPTY_VERIFICATION = Object.freeze({ entries: EMPTY_LIST, awaitingSecurityDecision: false });
+// verificationRequested: PIC Security sudah memilih Need Verification ke petugas security.
+const EMPTY_VERIFICATION = Object.freeze({ entries: EMPTY_LIST, awaitingSecurityDecision: false, verificationRequested: false });
 
 export function useIncidentVerification(incidentId) {
   const key = String(incidentId || '');
@@ -156,31 +157,43 @@ function updateIncidentVerification(incidentId, updater) {
   emitChange();
 }
 
-// Keputusan PIC Security apa pun (assign baru, kembalikan ke PIC, minta verifikasi ulang)
-// menyelesaikan penolakan verifikasi sebelumnya.
-function clearAwaitingSecurityDecision(incidentId) {
+// Tindak lanjut dibuka lagi (assign baru / kembalikan ke PIC) → penolakan verifikasi selesai dan
+// permintaan verifikasi lama batal; setelah semua Approved lagi PIC Security memutuskan ulang.
+function resetVerificationDecision(incidentId) {
   const current = verificationsByIncident.get(String(incidentId || ''));
-  if (!current?.awaitingSecurityDecision) return;
-  updateIncidentVerification(incidentId, (record) => ({ ...record, awaitingSecurityDecision: false }));
+  if (!current?.awaitingSecurityDecision && !current?.verificationRequested) return;
+  updateIncidentVerification(incidentId, (record) => ({ ...record, awaitingSecurityDecision: false, verificationRequested: false }));
 }
 
 export const INCIDENT_VERIFICATION_STATE = {
   NO_FOLLOW_UP: 'no_follow_up',
   UNSOLVED: 'unsolved',
   IN_PROGRESS: 'in_progress',
+  // Semua tindak lanjut Approved → PIC Security memilih Unsolve atau Need Verification.
   READY: 'ready',
+  // Need Verification: menunggu verifikasi petugas security (PIC Security tetap bisa verifikasi sendiri).
+  AWAITING_VERIFICATION: 'awaiting_verification',
   AWAITING_SECURITY: 'awaiting_security',
   CLOSED: 'closed',
 };
 
-// READY = semua tindak lanjut sudah Approved PIC Security → petugas pelapor verifikasi 1x.
 export function getIncidentVerificationState(followUps, verification, closure, unsolve = null) {
   if (unsolve) return INCIDENT_VERIFICATION_STATE.UNSOLVED;
   if (closure) return INCIDENT_VERIFICATION_STATE.CLOSED;
   if (!followUps?.length) return INCIDENT_VERIFICATION_STATE.NO_FOLLOW_UP;
   if (verification?.awaitingSecurityDecision) return INCIDENT_VERIFICATION_STATE.AWAITING_SECURITY;
   const allApproved = followUps.every((item) => item.status === FOLLOW_UP_STATUS.APPROVED || item.status === FOLLOW_UP_STATUS.DONE);
-  return allApproved ? INCIDENT_VERIFICATION_STATE.READY : INCIDENT_VERIFICATION_STATE.IN_PROGRESS;
+  if (!allApproved) return INCIDENT_VERIFICATION_STATE.IN_PROGRESS;
+  return verification?.verificationRequested ? INCIDENT_VERIFICATION_STATE.AWAITING_VERIFICATION : INCIDENT_VERIFICATION_STATE.READY;
+}
+
+function getStoredIncidentState(key) {
+  return getIncidentVerificationState(
+    followUpsByIncident.get(key) || EMPTY_LIST,
+    verificationsByIncident.get(key),
+    closuresByIncident.get(key),
+    unsolvesByIncident.get(key),
+  );
 }
 
 export function assignFollowUp(incidentId, { assigneeId, instruction, photoUrl, document, actorName }) {
@@ -197,7 +210,7 @@ export function assignFollowUp(incidentId, { assigneeId, instruction, photoUrl, 
     entries: [createEntry('assign', { actorName, actorRole: 'PIC Security', comment: instruction, photoUrl, at })],
   };
   updateIncidentFollowUps(incidentId, (items) => [...items, followUp]);
-  clearAwaitingSecurityDecision(incidentId);
+  resetVerificationDecision(incidentId);
   return followUp;
 }
 
@@ -229,27 +242,43 @@ export function returnFollowUpToPic(incidentId, followUpId, { comment, actorName
     status: FOLLOW_UP_STATUS.NEED_ACTION,
     entries: [...item.entries, createEntry('return', { actorName, actorRole: 'PIC Security', comment, verdict: 'rejected' })],
   }));
-  clearAwaitingSecurityDecision(incidentId);
+  resetVerificationDecision(incidentId);
 }
 
-// Verifikasi 1x oleh petugas pelapor untuk seluruh temuan. Sesuai → semua tindak lanjut Done dan
-// temuan ditutup. Belum sesuai → temuan kembali ke PIC Security untuk diputuskan.
-// Mengembalikan { ok, closed }.
-export function submitIncidentVerification(incidentId, { approved, comment, photoUrl, actorName }) {
+// PIC Security memilih NEED VERIFICATION setelah semua tindak lanjut Approved → notifikasi ke petugas
+// security untuk memverifikasi temuan. Mengembalikan true bila berhasil.
+export function requestIncidentVerification(incidentId, { comment = '', actorName }) {
   const key = String(incidentId || '');
-  const followUps = followUpsByIncident.get(key) || EMPTY_LIST;
-  const state = getIncidentVerificationState(followUps, verificationsByIncident.get(key), closuresByIncident.get(key), unsolvesByIncident.get(key));
-  if (state !== INCIDENT_VERIFICATION_STATE.READY) return { ok: false, closed: false };
+  if (getStoredIncidentState(key) !== INCIDENT_VERIFICATION_STATE.READY) return false;
+  updateIncidentVerification(key, (record) => ({
+    ...record,
+    entries: [...record.entries, createEntry('request', { actorName, actorRole: 'PIC Security', comment })],
+    verificationRequested: true,
+  }));
+  return true;
+}
 
-  const entry = createEntry('verify', { actorName, actorRole: 'Petugas Pelapor', comment, photoUrl, verdict: approved ? 'approved' : 'rejected' });
+// Verifikasi 1x untuk seluruh temuan, oleh petugas security (setelah Need Verification) atau langsung
+// oleh PIC Security (bySecurity). Sesuai → semua tindak lanjut Done dan temuan Closed. Belum sesuai →
+// temuan kembali ke PIC Security untuk diputuskan. Mengembalikan { ok, closed }.
+export function submitIncidentVerification(incidentId, { approved, comment, photoUrl, actorName, bySecurity = false }) {
+  const key = String(incidentId || '');
+  const state = getStoredIncidentState(key);
+  const canVerify = state === INCIDENT_VERIFICATION_STATE.AWAITING_VERIFICATION
+    || (bySecurity && state === INCIDENT_VERIFICATION_STATE.READY);
+  if (!canVerify) return { ok: false, closed: false };
+
+  const actorRole = bySecurity ? 'PIC Security' : 'Petugas Security';
+  const entry = createEntry('verify', { actorName, actorRole, comment, photoUrl, verdict: approved ? 'approved' : 'rejected' });
   updateIncidentVerification(incidentId, (record) => ({
     entries: [...record.entries, entry],
     awaitingSecurityDecision: !approved,
+    verificationRequested: false,
   }));
   if (!approved) return { ok: true, closed: false };
 
   updateIncidentFollowUps(incidentId, (items) => items.map((item) => ({ ...item, status: FOLLOW_UP_STATUS.DONE })));
-  closuresByIncident.set(key, { id: createId('fu-close'), at: entry.at, actorName, comment, photoUrl });
+  closuresByIncident.set(key, { id: createId('fu-close'), at: entry.at, actorName, actorRole, comment, photoUrl });
   emitChange();
   return { ok: true, closed: true };
 }
@@ -259,6 +288,7 @@ export function requestReverification(incidentId, { comment, actorName }) {
   updateIncidentVerification(incidentId, (record) => ({
     entries: [...record.entries, createEntry('reverify', { actorName, actorRole: 'PIC Security', comment })],
     awaitingSecurityDecision: false,
+    verificationRequested: true,
   }));
 }
 
@@ -267,14 +297,17 @@ export function getUnsolveReferencePhotoUrl(incident, evidencePhotoUrl) {
   return evidencePhotoUrl || incident?.photoUrl || null;
 }
 
-// PIC Security menutup temuan sebagai UNSOLVE: semua tindak lanjut ditutup (status Unsolve), catatan
+// PIC Security menutup temuan sebagai UNSOLVE setelah semua tindak lanjut Approved (keputusan awal,
+// atau setelah verifikasi belum sesuai): semua tindak lanjut ditutup (status Unsolve), catatan
 // wajib, evidence opsional. Kondisi saat unsolve menjadi foto acuan baru titik checkpoint asal
 // temuan sehingga patroli berikutnya bisa melapor AMAN terhadap kondisi tersebut.
 // Mengembalikan { ok, referenceUpdated }.
 export function unsolveIncident(incident, { comment, photoUrl = null, actorName }) {
   const key = String(incident?.id || '');
   const note = String(comment || '').trim();
-  if (!key || !note || closuresByIncident.has(key) || unsolvesByIncident.has(key)) return { ok: false, referenceUpdated: false };
+  const state = getStoredIncidentState(key);
+  const canUnsolve = state === INCIDENT_VERIFICATION_STATE.READY || state === INCIDENT_VERIFICATION_STATE.AWAITING_SECURITY;
+  if (!key || !note || !canUnsolve) return { ok: false, referenceUpdated: false };
 
   const at = new Date().toISOString();
   const referencePhotoUrl = getUnsolveReferencePhotoUrl(incident, photoUrl);
@@ -340,6 +373,11 @@ export function seedDemoFollowUps(incident, { securityName }) {
   updateIncidentFollowUps(incident?.id, (items) => [...demo, ...items]);
 }
 
+const VERIFICATION_LOG_HEADLINE = {
+  request: 'PIC Security memilih NEED VERIFICATION — notifikasi verifikasi dikirim ke petugas security',
+  reverify: 'PIC Security meminta verifikasi ulang ke petugas security',
+};
+
 const ENTRY_LOG_LABEL = {
   assign: 'menugaskan tindak lanjut',
   update: 'mengirim update tindak lanjut',
@@ -370,7 +408,7 @@ export function buildFollowUpLogItems(followUps, securityName, closure = null, v
       createdAt: closure.at,
       author: closure.actorName,
       tag: 'Temuan Ditutup',
-      headline: 'Ditutup — semua tindak lanjut di-approve PIC Security & terverifikasi petugas pelapor',
+      headline: `Ditutup — semua tindak lanjut di-approve PIC Security & terverifikasi ${closure.actorRole === 'PIC Security' ? 'langsung oleh PIC Security' : 'petugas security'}`,
       comment: '',
       photoUrl: null,
     });
@@ -382,9 +420,8 @@ export function buildFollowUpLogItems(followUps, securityName, closure = null, v
       createdAt: entry.at,
       author: entry.actorName,
       tag: 'Verifikasi Temuan',
-      headline: entry.kind === 'reverify'
-        ? 'PIC Security meminta verifikasi ulang ke petugas pelapor'
-        : `Petugas Pelapor memverifikasi temuan${entry.verdict === 'approved' ? ' — SESUAI' : ' — BELUM SESUAI, dikembalikan ke PIC Security'}`,
+      headline: VERIFICATION_LOG_HEADLINE[entry.kind]
+        || `${entry.actorRole} memverifikasi temuan${entry.verdict === 'approved' ? ' — SESUAI' : ' — BELUM SESUAI, dikembalikan ke PIC Security'}`,
       comment: entry.comment,
       photoUrl: entry.photoUrl,
     });

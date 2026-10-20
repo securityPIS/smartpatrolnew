@@ -1,11 +1,12 @@
 /*
 Tujuan: Tampilan alur tindak lanjut temuan (versi dummy): assign oleh PIC Security, update PIC fungsi,
         feedback/approve PIC Security, lalu satu kali verifikasi petugas pelapor setelah semua
-        tindak lanjut Approved, penutupan UNSOLVE oleh PIC Security, beserta switcher simulasi role.
+        tindak lanjut Approved PIC Security memilih UNSOLVE atau NEED VERIFICATION (minta petugas
+        security memverifikasi / verifikasi sendiri), beserta switcher simulasi role.
 Caller: IncidentDetailView (tab Info di bawah HOW, dan tab Update di atas Riwayat Update).
 Dependensi: followUpStore (state dummy), followUpPdf (dokumen otomatis), AsyncImage, ikon lucide-react.
 Main Functions: FollowUpRoleSwitcher, FollowUpAssignCard, FollowUpSectionList, FollowUpToast.
-                FollowUpSectionList juga memuat tombol & modal Unsolve (khusus PIC Security).
+                FollowUpSectionList juga memuat keputusan Unsolve / Need Verification (khusus PIC Security).
 Side Effects: Mengubah store dummy di memori dan membuka PDF; tidak menyentuh database.
 */
 
@@ -24,6 +25,7 @@ import {
   getAssigneeMeta,
   getIncidentVerificationState,
   getUnsolveReferencePhotoUrl,
+  requestIncidentVerification,
   requestReverification,
   returnFollowUpToPic,
   seedDemoFollowUps,
@@ -41,7 +43,7 @@ export function getSimulationRoleOptions() {
   return [
     { id: SECURITY_ASSIGNEE_ID, label: 'PIC Security' },
     ...PIC_FUNCTION_OPTIONS.map((option) => ({ id: option.id, label: `PIC ${option.functionName}` })),
-    { id: REPORTER_ROLE_ID, label: 'Petugas Pelapor' },
+    { id: REPORTER_ROLE_ID, label: 'Petugas Security' },
   ];
 }
 
@@ -130,7 +132,7 @@ function FollowUpModal({ title, subtitle, onClose, onSubmit, submitLabel, canSub
         <div className="p-5 bg-[#070b19]/40 border-t border-cyan-800/30 flex gap-3 shrink-0">
           {footerActions.map((action) => (
             <button key={action.key} type="button" disabled={action.disabled} onClick={action.onClick} className={`flex-1 py-4 px-2 text-white disabled:opacity-50 rounded-2xl text-xs font-black uppercase whitespace-nowrap transition-all shadow-xl active:scale-95 border flex items-center justify-center gap-2 ${footerActions.length > 1 ? 'tracking-normal' : 'tracking-widest'} ${action.colorClass || PRIMARY_ACTION_CLASS}`}>
-              <Send className="w-4 h-4 shrink-0" /> {action.label}
+              <Send className="w-4 h-4 shrink-0" /> <span className={`text-xs font-black uppercase truncate ${footerActions.length > 1 ? 'tracking-normal' : 'tracking-widest'}`}>{action.label}</span>
             </button>
           ))}
         </div>
@@ -363,7 +365,7 @@ function ReviewFollowUpModal({ incident, followUp, sequence, securityName, onClo
           {approved && (
             <div className="text-[10px] mt-2 ml-1 space-y-1">
               <p className="text-sky-300"><span className="font-bold">Konfirmasi Rencana</span>: rencana tindakan PIC fungsi disetujui. Status kembali Need Action sampai pekerjaan selesai dan diupdate lagi.</p>
-              <p className="text-teal-300"><span className="font-bold">Approve</span>: pekerjaan selesai. Setelah semua tindak lanjut Approved, petugas pelapor ({incident.reportedBy || '-'}) memverifikasi temuan 1x.</p>
+              <p className="text-teal-300"><span className="font-bold">Approve</span>: pekerjaan selesai. Setelah semua tindak lanjut Approved, PIC Security memilih Unsolve atau Need Verification.</p>
             </div>
           )}
           {!approved && <p className="text-[10px] text-amber-300 mt-2 ml-1">Status kembali menjadi Need Action untuk ditindaklanjuti ulang.</p>}
@@ -373,20 +375,21 @@ function ReviewFollowUpModal({ incident, followUp, sequence, securityName, onClo
   );
 }
 
-function VerifyIncidentModal({ incident, followUps, securityName, reporterName, onClose, onSubmitted }) {
+function VerifyIncidentModal({ incident, followUps, securityName, reporterName, bySecurity = false, onClose, onSubmitted }) {
   const [approved, setApproved] = useState(null);
   const [comment, setComment] = useState('');
   const [photoUrl, setPhotoUrl] = useState(null);
   const canSubmit = approved !== null && Boolean(comment.trim()) && Boolean(photoUrl);
+  const verifierLabel = bySecurity ? `PIC Security (${securityName}) · verifikasi sendiri` : `Petugas Security (${reporterName})`;
 
   const handleSubmit = () => {
     if (!canSubmit) return;
-    const result = submitIncidentVerification(incident.id, { approved, comment: comment.trim(), photoUrl, actorName: reporterName });
+    const result = submitIncidentVerification(incident.id, { approved, comment: comment.trim(), photoUrl, actorName: bySecurity ? securityName : reporterName, bySecurity });
     onSubmitted({ approved, ...result });
   };
 
   return (
-    <FollowUpModal title="Verifikasi Temuan" subtitle={`${followUps.length} tindak lanjut · ${reporterName}`} onClose={onClose} onSubmit={handleSubmit} submitLabel="Kirim Verifikasi" canSubmit={canSubmit}>
+    <FollowUpModal title="Verifikasi Temuan" subtitle={`${followUps.length} tindak lanjut · ${verifierLabel}`} onClose={onClose} onSubmit={handleSubmit} submitLabel="Kirim Verifikasi" canSubmit={canSubmit}>
       <div className="space-y-2">
         <p className={LABEL_CLASS}>Tindak lanjut yang sudah di-approve PIC Security</p>
         {followUps.map((followUp, index) => {
@@ -405,7 +408,7 @@ function VerifyIncidentModal({ incident, followUps, securityName, reporterName, 
         <label className={LABEL_CLASS}>Hasil verifikasi lapangan <span className="text-rose-400">*</span></label>
         <VerdictToggle value={approved} onChange={setApproved} approveLabel="Terverifikasi" rejectLabel="Belum Sesuai" />
         {approved === true && <p className="text-[10px] text-emerald-300 mt-2 ml-1">Semua tindak lanjut menjadi Done dan temuan ditutup (Closed).</p>}
-        {approved === false && <p className="text-[10px] text-amber-300 mt-2 ml-1">Temuan dikembalikan ke PIC Security untuk ditindaklanjuti.</p>}
+        {approved === false && <p className="text-[10px] text-amber-300 mt-2 ml-1">{bySecurity ? 'Temuan kembali ke keputusan PIC Security (kembalikan ke PIC, assign baru, verifikasi ulang, atau Unsolve).' : 'Temuan dikembalikan ke PIC Security untuk ditindaklanjuti.'}</p>}
       </div>
       <div>
         <label className={LABEL_CLASS}>Catatan Verifikasi <span className="text-rose-400">*</span></label>
@@ -451,10 +454,41 @@ function ReverifyRequestModal({ incident, reporterName, securityName, onClose, o
     onSubmitted();
   };
   return (
-    <FollowUpModal title="Minta Verifikasi Ulang" subtitle={`Ke petugas pelapor · ${reporterName}`} onClose={onClose} onSubmit={handleSubmit} submitLabel="Kirim" canSubmit={canSubmit}>
+    <FollowUpModal title="Minta Verifikasi Ulang" subtitle={`Ke petugas security · ${reporterName}`} onClose={onClose} onSubmit={handleSubmit} submitLabel="Kirim" canSubmit={canSubmit}>
       <div>
         <label className={LABEL_CLASS}>Catatan untuk petugas <span className="text-rose-400">*</span></label>
         <textarea autoFocus value={comment} onChange={(event) => setComment(event.target.value)} rows={3} placeholder="Contoh: tindak lanjut sudah sesuai instruksi, mohon dicek ulang bagian ..." className={TEXTAREA_CLASS} />
+      </div>
+    </FollowUpModal>
+  );
+}
+
+const VERIFY_ACTION_CLASS = 'bg-fuchsia-600 hover:bg-fuchsia-500 shadow-fuchsia-500/20 border-fuchsia-400/20';
+
+// NEED VERIFICATION: kirim notifikasi verifikasi ke petugas security, atau PIC Security verifikasi sendiri.
+function NeedVerificationModal({ incident, reporterName, securityName, onClose, onRequested, onVerifySelf }) {
+  const [comment, setComment] = useState('');
+
+  const handleRequest = () => {
+    const ok = requestIncidentVerification(incident.id, { comment: comment.trim(), actorName: securityName });
+    onRequested(ok);
+  };
+
+  const actions = [
+    { key: 'self', label: 'Verifikasi Sendiri', onClick: onVerifySelf, colorClass: 'bg-sky-700 hover:bg-sky-600 shadow-sky-500/20 border-sky-400/20' },
+    { key: 'request', label: 'Kirim ke Petugas', onClick: handleRequest, colorClass: VERIFY_ACTION_CLASS },
+  ];
+
+  return (
+    <FollowUpModal title="Need Verification" subtitle={`${incident.location || 'Temuan'} · semua tindak lanjut Approved`} onClose={onClose} actions={actions}>
+      <div className="p-3 rounded-xl border border-fuchsia-500/40 bg-fuchsia-500/5 space-y-1.5">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Pilih cara verifikasi</p>
+        <p className="text-[11px] text-cyan-200 leading-relaxed"><span className="font-bold text-fuchsia-200">Kirim ke Petugas</span>: notifikasi dikirim ke petugas security ({reporterName}) untuk memverifikasi kondisi di lapangan.</p>
+        <p className="text-[11px] text-cyan-200 leading-relaxed"><span className="font-bold text-sky-200">Verifikasi Sendiri</span>: PIC Security langsung mengisi hasil verifikasi beserta evidence.</p>
+      </div>
+      <div>
+        <label className={LABEL_CLASS}>Pesan untuk petugas <span className="text-cyan-700 normal-case">(opsional)</span></label>
+        <textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={3} placeholder="Contoh: mohon cek kondisi pagar dek saat patroli berikutnya." className={TEXTAREA_CLASS} />
       </div>
     </FollowUpModal>
   );
@@ -591,7 +625,7 @@ function getWaitingHint(followUp, assignee, reporterName, isClosed) {
       : `Menunggu update dari ${assignee.label}.`;
   }
   if (followUp.status === FOLLOW_UP_STATUS.NEED_REVIEW) return 'Menunggu feedback PIC Security.';
-  if (followUp.status === FOLLOW_UP_STATUS.APPROVED) return `Sudah di-approve PIC Security. Verifikasi petugas pelapor (${reporterName}) dilakukan 1x setelah semua tindak lanjut Approved.`;
+  if (followUp.status === FOLLOW_UP_STATUS.APPROVED) return 'Sudah di-approve PIC Security. Setelah semua tindak lanjut Approved, PIC Security memilih Unsolve atau Need Verification.';
   return 'Tindak lanjut selesai dan temuan sudah terverifikasi.';
 }
 
@@ -740,18 +774,30 @@ function IncidentUnsolveCard({ unsolve, onPreviewPhoto }) {
   );
 }
 
-function UnsolveActionButton({ onClick }) {
+const DECISION_BUTTON_CLASS = 'flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-[0.98]';
+
+function SecurityDecisionButtons({ onAction, showNeedVerification = true }) {
   return (
-    <button type="button" onClick={onClick} className="w-full py-3 border border-orange-500/50 text-orange-300 rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-orange-500/10 transition-all active:scale-[0.98]">
-      <Ban className="w-4 h-4" /> Unsolve Temuan
-    </button>
+    <div className="flex gap-2">
+      <button type="button" onClick={() => onAction('unsolve')} className={`${DECISION_BUTTON_CLASS} border border-orange-500/50 text-orange-300 hover:bg-orange-500/10`}>
+        <Ban className="w-4 h-4" /> <span className="text-xs font-black uppercase tracking-widest">Unsolve</span>
+      </button>
+      {showNeedVerification && (
+        <button type="button" onClick={() => onAction('need-verification')} className={`${DECISION_BUTTON_CLASS} bg-fuchsia-600 text-white hover:bg-fuchsia-500`}>
+          <ShieldCheck className="w-4 h-4 shrink-0" /> <span className="text-xs font-black uppercase tracking-wider">Need Verification</span>
+        </button>
+      )}
+    </div>
   );
 }
 
-function IncidentVerificationCard({ state, followUps, verification, closure, simRole, reporterName, onAction }) {
+function IncidentVerificationCard({ state, followUps, verification, closure, simRole, securityName, reporterName, onAction }) {
   if (state === INCIDENT_VERIFICATION_STATE.NO_FOLLOW_UP || state === INCIDENT_VERIFICATION_STATE.UNSOLVED) return null;
   const approvedCount = followUps.filter((item) => item.status === FOLLOW_UP_STATUS.APPROVED || item.status === FOLLOW_UP_STATUS.DONE).length;
   const lastVerify = [...(verification?.entries || [])].reverse().find((entry) => entry.kind === 'verify');
+  const lastRequest = [...(verification?.entries || [])].reverse().find((entry) => entry.kind === 'request' || entry.kind === 'reverify');
+  const isSecurity = simRole === SECURITY_ASSIGNEE_ID;
+  const isReporter = simRole === REPORTER_ROLE_ID;
 
   if (state === INCIDENT_VERIFICATION_STATE.CLOSED) {
     const stamp = formatFollowUpTimestamp(closure.at);
@@ -760,7 +806,7 @@ function IncidentVerificationCard({ state, followUps, verification, closure, sim
         <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
         <div>
           <p className="text-xs font-bold text-emerald-300 uppercase tracking-widest">Temuan Closed</p>
-          <p className="text-[11px] text-cyan-400 mt-0.5">Terverifikasi oleh {closure.actorName} · {stamp.date} {stamp.time}</p>
+          <p className="text-[11px] text-cyan-400 mt-0.5">Terverifikasi oleh {closure.actorRole ? `${closure.actorRole} · ` : ''}{closure.actorName} · {stamp.date} {stamp.time}</p>
         </div>
       </div>
     );
@@ -776,12 +822,13 @@ function IncidentVerificationCard({ state, followUps, verification, closure, sim
             <p className="text-[11px] text-cyan-400 mt-0.5">{lastVerify?.actorName || reporterName}: {lastVerify?.comment || '-'}</p>
           </div>
         </div>
-        {simRole === SECURITY_ASSIGNEE_ID ? (
+        {isSecurity ? (
           <>
-            <p className="text-[11px] text-amber-200/90">Putuskan tindakan: kembalikan tindak lanjut tertentu ke PIC fungsi, assign tindak lanjut baru (tab Info), atau minta petugas verifikasi ulang.</p>
+            <p className="text-[11px] text-amber-200/90">Putuskan tindakan: kembalikan tindak lanjut tertentu ke PIC fungsi, assign tindak lanjut baru (tab Info), minta verifikasi ulang, atau tetapkan Unsolve.</p>
             <button type="button" onClick={() => onAction('reverify')} className="w-full py-3 border border-fuchsia-500/50 text-fuchsia-200 rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-fuchsia-500/10 transition-all active:scale-[0.98]">
-              <RotateCcw className="w-4 h-4" /> Minta Verifikasi Ulang
+              <RotateCcw className="w-4 h-4" /> <span className="text-xs font-black uppercase tracking-widest">Minta Verifikasi Ulang</span>
             </button>
+            <SecurityDecisionButtons onAction={onAction} showNeedVerification={false} />
           </>
         ) : (
           <p className="text-[11px] text-cyan-600 italic">Menunggu keputusan PIC Security.</p>
@@ -792,20 +839,44 @@ function IncidentVerificationCard({ state, followUps, verification, closure, sim
 
   if (state === INCIDENT_VERIFICATION_STATE.READY) {
     return (
-      <div className={`p-3.5 rounded-xl border space-y-3 ${simRole === REPORTER_ROLE_ID ? 'border-fuchsia-500/50 bg-fuchsia-500/5' : 'border-fuchsia-900/50 bg-[#0b1229]/60'}`}>
+      <div className={`p-3.5 rounded-xl border space-y-3 ${isSecurity ? 'border-teal-500/50 bg-teal-500/5' : 'border-teal-900/50 bg-[#0b1229]/60'}`}>
         <div className="flex items-start gap-3">
-          <CheckCircle2 className="w-5 h-5 text-fuchsia-300 shrink-0 mt-0.5" />
+          <CheckCircle2 className="w-5 h-5 text-teal-300 shrink-0 mt-0.5" />
           <div>
-            <p className="text-xs font-bold text-fuchsia-200 uppercase tracking-widest">Siap Diverifikasi</p>
-            <p className="text-[11px] text-cyan-400 mt-0.5">Semua tindak lanjut ({followUps.length}) sudah di-approve PIC Security.</p>
+            <p className="text-xs font-bold text-teal-200 uppercase tracking-widest">Semua Tindak Lanjut Approved</p>
+            <p className="text-[11px] text-cyan-400 mt-0.5">{followUps.length} tindak lanjut sudah di-approve PIC Security. Pilih Unsolve atau Need Verification.</p>
           </div>
         </div>
-        {simRole === REPORTER_ROLE_ID ? (
+        {isSecurity
+          ? <SecurityDecisionButtons onAction={onAction} />
+          : <p className="text-[11px] text-cyan-600 italic">Menunggu keputusan PIC Security ({securityName}): Unsolve atau Need Verification.</p>}
+      </div>
+    );
+  }
+
+  if (state === INCIDENT_VERIFICATION_STATE.AWAITING_VERIFICATION) {
+    const stamp = lastRequest ? formatFollowUpTimestamp(lastRequest.at) : null;
+    return (
+      <div className={`p-3.5 rounded-xl border space-y-3 ${isReporter || isSecurity ? 'border-fuchsia-500/50 bg-fuchsia-500/5' : 'border-fuchsia-900/50 bg-[#0b1229]/60'}`}>
+        <div className="flex items-start gap-3">
+          <ShieldCheck className="w-5 h-5 text-fuchsia-300 shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <p className="text-xs font-bold text-fuchsia-200 uppercase tracking-widest">Need Verification</p>
+            <p className="text-[11px] text-cyan-400 mt-0.5">
+              {isReporter ? `Notifikasi dari PIC Security${stamp ? ` · ${stamp.date} ${stamp.time}` : ''}: mohon verifikasi kondisi temuan di lapangan.` : `Menunggu verifikasi petugas security (${reporterName}).`}
+            </p>
+            {lastRequest?.comment && <p className="text-xs text-cyan-100 whitespace-pre-wrap mt-1">"{lastRequest.comment}"</p>}
+          </div>
+        </div>
+        {isReporter && (
           <button type="button" onClick={() => onAction('verify')} className="w-full py-3 bg-fuchsia-600 text-white rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-fuchsia-500 transition-all active:scale-[0.98]">
-            <CheckCircle2 className="w-4 h-4" /> Verifikasi Temuan
+            <CheckCircle2 className="w-4 h-4" /> <span className="text-xs font-black uppercase tracking-widest">Verifikasi Temuan</span>
           </button>
-        ) : (
-          <p className="text-[11px] text-cyan-600 italic">Menunggu verifikasi petugas pelapor ({reporterName}).</p>
+        )}
+        {isSecurity && (
+          <button type="button" onClick={() => onAction('verify-self')} className="w-full py-3 border border-sky-500/50 text-sky-200 rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-sky-500/10 transition-all active:scale-[0.98]">
+            <ShieldCheck className="w-4 h-4" /> <span className="text-xs font-black uppercase tracking-widest">Verifikasi Sendiri</span>
+          </button>
         )}
       </div>
     );
@@ -815,8 +886,8 @@ function IncidentVerificationCard({ state, followUps, verification, closure, sim
     <div className="p-3.5 rounded-xl border border-cyan-900/50 bg-[#0b1229]/60 flex items-start gap-3">
       <ShieldCheck className="w-5 h-5 text-cyan-600 shrink-0 mt-0.5" />
       <div>
-        <p className="text-xs font-bold text-cyan-400 uppercase tracking-widest">Verifikasi Petugas Pelapor</p>
-        <p className="text-[11px] text-cyan-600 mt-0.5">{approvedCount}/{followUps.length} tindak lanjut approved. Verifikasi 1x tersedia setelah semua di-approve PIC Security.</p>
+        <p className="text-xs font-bold text-cyan-400 uppercase tracking-widest">Menunggu Approval Tindak Lanjut</p>
+        <p className="text-[11px] text-cyan-600 mt-0.5">{approvedCount}/{followUps.length} tindak lanjut approved. Setelah semua di-approve PIC Security, tersedia pilihan Unsolve atau Need Verification.</p>
       </div>
     </div>
   );
@@ -827,10 +898,8 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
   const [isListExpanded, setIsListExpanded] = useState(false);
   const approvedCount = followUps.filter((followUp) => followUp.status === FOLLOW_UP_STATUS.APPROVED || followUp.status === FOLLOW_UP_STATUS.DONE).length;
   const verificationState = getIncidentVerificationState(followUps, verification, closure, unsolve);
-  // Unsolve: opsi PIC Security selama temuan masih berjalan (bukan tindakan wajib → tidak dihitung).
-  const canUnsolve = !isClosed && simRole === SECURITY_ASSIGNEE_ID;
-  const hasIncidentAction = (verificationState === INCIDENT_VERIFICATION_STATE.READY && simRole === REPORTER_ROLE_ID)
-    || (verificationState === INCIDENT_VERIFICATION_STATE.AWAITING_SECURITY && simRole === SECURITY_ASSIGNEE_ID);
+  const hasIncidentAction = (verificationState === INCIDENT_VERIFICATION_STATE.AWAITING_VERIFICATION && simRole === REPORTER_ROLE_ID)
+    || ((verificationState === INCIDENT_VERIFICATION_STATE.READY || verificationState === INCIDENT_VERIFICATION_STATE.AWAITING_SECURITY) && simRole === SECURITY_ASSIGNEE_ID);
   const myActionCount = followUps.filter((followUp) => {
     const { canUpdate, canReview } = getFollowUpActions(followUp, simRole, isClosed);
     return canUpdate || canReview;
@@ -877,6 +946,7 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
                   verification={verification}
                   closure={closure}
                   simRole={simRole}
+                  securityName={securityName}
                   reporterName={reporterName}
                   onAction={(type) => setActiveAction({ type })}
                 />
@@ -900,12 +970,6 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
         )}
       </div>
 
-      {canUnsolve && (
-        <div className="mt-3">
-          <UnsolveActionButton onClick={() => setActiveAction({ type: 'unsolve' })} />
-          <p className="text-[10px] text-cyan-700 mt-1.5 ml-1">Hanya PIC Security · menutup semua tindak lanjut bila temuan tidak dapat diselesaikan.</p>
-        </div>
-      )}
 
       {activeAction?.type === 'update' && (
         <UpdateFollowUpModal
@@ -948,18 +1012,34 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
           }}
         />
       )}
-      {activeAction?.type === 'verify' && (
+      {(activeAction?.type === 'verify' || activeAction?.type === 'verify-self') && (
         <VerifyIncidentModal
           incident={incident}
           followUps={followUps}
           securityName={securityName}
           reporterName={reporterName}
+          bySecurity={activeAction.type === 'verify-self'}
           onClose={closeAction}
           onSubmitted={({ approved, ok, closed }) => {
             closeAction();
             if (!ok) onToast('Verifikasi tidak bisa dikirim: status tindak lanjut berubah. Muat ulang detail temuan.');
-            else if (!approved) onToast('Verifikasi: belum sesuai. Temuan dikembalikan ke PIC Security.');
+            else if (!approved) onToast('Verifikasi: belum sesuai. Temuan kembali ke keputusan PIC Security.');
             else if (closed) onToast('Verifikasi terkirim. Semua tindak lanjut Done — temuan ditutup (Closed).');
+          }}
+        />
+      )}
+      {activeAction?.type === 'need-verification' && (
+        <NeedVerificationModal
+          incident={incident}
+          reporterName={reporterName}
+          securityName={securityName}
+          onClose={closeAction}
+          onVerifySelf={() => setActiveAction({ type: 'verify-self' })}
+          onRequested={(ok) => {
+            closeAction();
+            onToast(ok
+              ? `Need Verification: notifikasi terkirim ke petugas security (${reporterName}) untuk memverifikasi temuan.`
+              : 'Permintaan verifikasi tidak bisa dikirim: status tindak lanjut berubah.');
           }}
         />
       )}
@@ -971,7 +1051,7 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
           onClose={closeAction}
           onSubmitted={({ ok, referenceUpdated, checkpointName }) => {
             closeAction();
-            if (!ok) onToast('Unsolve tidak bisa disimpan: temuan sudah ditutup.');
+            if (!ok) onToast('Unsolve tidak bisa disimpan: status temuan berubah (semua tindak lanjut harus Approved).');
             else if (referenceUpdated) onToast(`Temuan ditetapkan UNSOLVE. Semua tindak lanjut ditutup.\nFoto kondisi awal titik ${checkpointName} diperbarui — tombol AMAN tersedia lagi.`);
             else onToast('Temuan ditetapkan UNSOLVE. Semua tindak lanjut ditutup.');
           }}
@@ -985,7 +1065,7 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
           onClose={closeAction}
           onSubmitted={() => {
             closeAction();
-            onToast(`Permintaan verifikasi ulang dikirim ke petugas pelapor (${reporterName}).`);
+            onToast(`Permintaan verifikasi ulang dikirim ke petugas security (${reporterName}).`);
           }}
         />
       )}

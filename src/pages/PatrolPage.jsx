@@ -314,7 +314,14 @@ const PatrolPage = React.memo(function PatrolPage() {
     // Label induk hanya untuk sub yang tampil di luar kelompok main-nya.
     const parentName = standalone && definition?.type === 'sub' ? definitionById.get(definition.parentId)?.name : '';
     // Laporan titik lewat tap NFC asli; tombol Simulasi Tap meniru tap tersebut (tanpa verifikasi NFC).
-    const canSimulateTap = !isCheckpointLocked;
+    // Checklist terkunci → arahkan ke isian status shift dulu, bukan diam saja.
+    const handleSimulateTap = () => {
+      if (isCheckpointLocked) {
+        openShiftStatusModal();
+        return;
+      }
+      setNfcSelection({ item, definition, verified: false, simulated: true });
+    };
 
     return (
       <div
@@ -349,9 +356,8 @@ const PatrolPage = React.memo(function PatrolPage() {
             {renderReferencePhotoButton(item, referencePhoto)}
             <button
               type="button"
-              disabled={!canSimulateTap}
-              onClick={() => setNfcSelection({ item, definition, verified: false, simulated: true })}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-fuchsia-500/40 bg-fuchsia-500/10 text-fuchsia-200 hover:bg-fuchsia-500/20 transition-colors disabled:border-slate-800 disabled:bg-transparent disabled:text-slate-500"
+              onClick={handleSimulateTap}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-colors ${isCheckpointLocked ? 'border-slate-700 text-slate-400' : 'border-fuchsia-500/40 bg-fuchsia-500/10 text-fuchsia-200 hover:bg-fuchsia-500/20'}`}
               aria-label={`Simulasi tap NFC di ${item.name}`}
             >
               <Nfc className="w-3.5 h-3.5" />
@@ -777,6 +783,7 @@ const PatrolPage = React.memo(function PatrolPage() {
            parentName={nfcSelection.definition?.type === 'sub' ? definitionById.get(nfcSelection.definition.parentId)?.name : ''}
            onChoose={handleNfcChoice}
            onUpdateTemuan={handleUpdateOpenTemuan}
+           reportBlockedReason={canPatrolCurrentShip ? '' : 'Akun ini tidak ditugaskan patroli di kapal ini, jadi laporan Aman/Temuan tidak bisa dikirim. Login sebagai petugas kapal ini atau PIC untuk melapor.'}
            onClose={() => setNfcSelection(null)}
            onPreviewPhoto={(url) => setPreviewPhoto({ url, author: `Foto acuan · ${nfcSelection.item.name}` })}
          />

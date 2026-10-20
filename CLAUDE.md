@@ -65,17 +65,20 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
 ## Verifikasi temuan (tindak lanjut) — `src/components/incidentFollowUp/`
 - Status tindak lanjut: Need Action → Need Review → (PIC Security) **Approved** → Done. "Konfirmasi
   Rencana" mengembalikan ke Need Action; hanya "Approve" yang dihitung selesai.
-- Petugas pelapor verifikasi **1x per temuan** (`submitIncidentVerification`) hanya bila SEMUA tindak
-  lanjut Approved. Sesuai → semua Done + temuan Closed. Belum sesuai → `awaitingSecurityDecision`;
-  PIC Security memutuskan: `returnFollowUpToPic`, assign baru, atau `requestReverification`.
-- **UNSOLVE** (khusus PIC Security, tombol "Unsolve Temuan" di tab Update): `unsolveIncident(incident, …)`
-  menutup semua tindak lanjut (status Unsolve), catatan wajib, evidence opsional. Temuan bukan Aman
-  bukan Closed. Kondisi saat unsolve (evidence, atau foto temuan bila kosong) jadi foto acuan baru
-  titik (`referenceOverridesByCheckpoint`, kunci `shipId|nama titik`).
+- Setelah SEMUA tindak lanjut Approved (state `READY`), PIC Security memilih:
+  - **UNSOLVE** (`unsolveIncident(incident, …)`): semua tindak lanjut ditutup (status Unsolve), catatan
+    wajib, evidence opsional. Temuan bukan Aman bukan Closed. Kondisi saat unsolve (evidence, atau foto
+    temuan bila kosong) jadi foto acuan baru titik (`referenceOverridesByCheckpoint`, kunci `shipId|nama`).
+  - **NEED VERIFICATION**: `requestIncidentVerification` (notifikasi ke petugas security → state
+    `AWAITING_VERIFICATION`, petugas verifikasi) ATAU PIC Security verifikasi sendiri
+    (`submitIncidentVerification(..., { bySecurity: true })`). Sesuai → semua Done + Closed.
+  - Belum sesuai → `awaitingSecurityDecision`; PIC Security: `returnFollowUpToPic`, assign baru,
+    `requestReverification`, atau Unsolve. Assign baru / kembalikan ke PIC membatalkan permintaan verifikasi.
 - Patroli (`PatrolPage` + `PatrolNfcChoiceSheet`): temuan patroli di titik (kapal+nama) yang belum
   Closed/Unsolve = OPEN (`isPatrolTemuanOpen`) → pilihan tap jadi TEMUAN BARU / UPDATE TEMUAN (berlaku
   juga untuk tap NFC asli). Update Temuan membuka detail temuan (`patrolUpdateIntentAt`) langsung ke form
   update riwayat sebagai Petugas. Tanpa temuan open → AMAN/TEMUAN, foto acuan pakai override Unsolve.
 - Item checkpoint pending tidak lagi punya badge "Tap NFC"/"Tanpa NFC"; diganti tombol "Simulasi Tap"
-  (buka sheet tanpa verifikasi NFC). Tombol "+ Update" Riwayat Update hanya untuk role Petugas.
+  (buka sheet tanpa verifikasi NFC; checklist terkunci → buka modal status shift; akun yang tak bisa
+  patroli kapal ini melihat alasan, tombol lapor nonaktif). "+ Update" Riwayat Update hanya role Petugas.
 - Store masih dummy in-memory (belum ke database).

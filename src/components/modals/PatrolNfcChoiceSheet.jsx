@@ -38,7 +38,7 @@ function OpenTemuanCard({ incident, onClick }) {
     : <div className={className}>{content}</div>;
 }
 
-export default function PatrolNfcChoiceSheet({ selection, openTemuan = [], referenceOverride = null, parentName, onChoose, onUpdateTemuan, onClose, onPreviewPhoto }) {
+export default function PatrolNfcChoiceSheet({ selection, openTemuan = [], referenceOverride = null, reportBlockedReason = '', parentName, onChoose, onUpdateTemuan, onClose, onPreviewPhoto }) {
   const dialogRef = useFocusTrap(Boolean(selection));
   const [isPickingTemuan, setIsPickingTemuan] = React.useState(false);
   if (!selection) return null;
@@ -127,12 +127,16 @@ export default function PatrolNfcChoiceSheet({ selection, openTemuan = [], refer
               )}
 
               <p className="text-xs font-bold text-cyan-200 text-center pt-1">{hasOpenTemuan ? 'Apa yang ingin dilaporkan?' : 'Bagaimana kondisi titik ini?'}</p>
+              {reportBlockedReason && (
+                <p role="alert" className="text-[11px] text-amber-200 text-center px-2 py-2 rounded-xl border border-amber-500/40 bg-amber-950/20">{reportBlockedReason}</p>
+              )}
               {hasOpenTemuan ? (
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
                     onClick={() => onChoose('temuan')}
-                    className="py-5 rounded-2xl border border-yellow-500/50 bg-yellow-500/10 hover:bg-yellow-500/25 text-yellow-100 font-black tracking-widest flex flex-col items-center gap-2 transition-colors"
+                    disabled={Boolean(reportBlockedReason)}
+                    className="disabled:opacity-40 py-5 rounded-2xl border border-yellow-500/50 bg-yellow-500/10 hover:bg-yellow-500/25 text-yellow-100 font-black tracking-widest flex flex-col items-center gap-2 transition-colors"
                   >
                     <FilePlus2 className="w-8 h-8 text-yellow-400" /> TEMUAN BARU
                   </button>
@@ -149,14 +153,16 @@ export default function PatrolNfcChoiceSheet({ selection, openTemuan = [], refer
                   <button
                     type="button"
                     onClick={() => onChoose('aman')}
-                    className="py-5 rounded-2xl border border-emerald-500/50 bg-emerald-500/10 hover:bg-emerald-500/25 text-emerald-100 font-black tracking-widest flex flex-col items-center gap-2 transition-colors"
+                    disabled={Boolean(reportBlockedReason)}
+                    className="disabled:opacity-40 py-5 rounded-2xl border border-emerald-500/50 bg-emerald-500/10 hover:bg-emerald-500/25 text-emerald-100 font-black tracking-widest flex flex-col items-center gap-2 transition-colors"
                   >
                     <CheckCircle2 className="w-8 h-8 text-emerald-400" /> AMAN
                   </button>
                   <button
                     type="button"
                     onClick={() => onChoose('temuan')}
-                    className="py-5 rounded-2xl border border-yellow-500/50 bg-yellow-500/10 hover:bg-yellow-500/25 text-yellow-100 font-black tracking-widest flex flex-col items-center gap-2 transition-colors"
+                    disabled={Boolean(reportBlockedReason)}
+                    className="disabled:opacity-40 py-5 rounded-2xl border border-yellow-500/50 bg-yellow-500/10 hover:bg-yellow-500/25 text-yellow-100 font-black tracking-widest flex flex-col items-center gap-2 transition-colors"
                   >
                     <AlertTriangle className="w-8 h-8 text-yellow-400" /> TEMUAN
                   </button>

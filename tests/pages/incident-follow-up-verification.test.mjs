@@ -137,3 +137,56 @@ test('temuan open: patroli & belum Closed/Unsolve; SOS dan status closed tidak d
   assert.equal(isPatrolTemuanOpen({ id: 'sos-1', isPatrol: true, isSOS: true }, undefined), false);
   assert.equal(isPatrolTemuanOpen({ id: 'manual-1' }, undefined), false);
 });
+
+test('label status per POV role: Need … untuk yang bertindak, Waiting … untuk yang menunggu', () => {
+  const { getFollowUpStatusView: view, getIncidentStatusView: incidentView, SECURITY_ASSIGNEE_ID: SEC, REPORTER_ROLE_ID: PTG } = store;
+  const incidentId = 'inc-pov';
+  const a = assignFollowUp(incidentId, { assigneeId: 'fleet', instruction: 'A', actorName: 'Sec' });
+  const current = () => store.getStoredFollowUp(incidentId, a.id);
+  const labels = () => [view(current(), SEC).label, view(current(), 'fleet').label, view(current(), PTG).label];
+
+  assert.deepEqual(labels(), ['Waiting Action', 'Need Action', 'In Progress']);
+  submitFollowUpUpdate(incidentId, a.id, { comment: 'rencana', actorName: 'PIC', actorRole: 'PIC Fleet' });
+  assert.deepEqual(labels(), ['Need Review', 'Waiting Review', 'In Progress']);
+  submitSecurityReview(incidentId, a.id, { approved: true, finalApproval: false, comment: '', actorName: 'Sec' });
+  assert.deepEqual(labels(), ['Waiting Action', 'Need Action', 'In Progress']);
+  assert.equal(view(current(), 'fleet').note, 'Plan Approved');
+  submitFollowUpUpdate(incidentId, a.id, { comment: 'selesai?', actorName: 'PIC', actorRole: 'PIC Fleet' });
+  submitSecurityReview(incidentId, a.id, { approved: false, comment: 'belum', actorName: 'Sec' });
+  assert.deepEqual(labels(), ['Waiting Revision', 'Need Revision', 'In Progress']);
+  approveFlow(incidentId, a.id);
+  assert.deepEqual(labels(), ['Approved', 'Approved', 'Work Done']);
+  // PIC fungsi lain melihat versi netral.
+  assert.equal(view(current(), 'hsse').label, 'Work Done');
+
+  assert.equal(incidentView(V.READY, SEC).label, 'Need Decision');
+  assert.equal(incidentView(V.READY, 'fleet').label, 'Waiting Decision');
+  assert.equal(incidentView(V.READY, PTG).label, 'In Progress');
+  assert.equal(incidentView(V.AWAITING_VERIFICATION, PTG).label, 'Need Verification');
+  assert.equal(incidentView(V.AWAITING_VERIFICATION, SEC).label, 'Waiting Verification');
+  assert.equal(incidentView(V.AWAITING_SECURITY, PTG).label, 'Waiting Decision');
+  assert.equal(incidentView(V.NO_FOLLOW_UP, SEC).label, 'Need Assign');
+  assert.equal(incidentView(V.IN_PROGRESS, SEC, { approvedCount: 1, total: 2 }).label, 'In Progress (1/2)');
+});
+
+test('assign baru saat Need Verification → verifikasi otomatis ditunda + notifikasi ke petugas', () => {
+  const incidentId = 'inc-postpone';
+  const a = assignFollowUp(incidentId, { assigneeId: 'fleet', instruction: 'A', actorName: 'Sec' });
+  approveFlow(incidentId, a.id);
+  requestIncidentVerification(incidentId, { actorName: 'Sec' });
+  assert.equal(store.isVerificationRequested(incidentId), true);
+
+  assignFollowUp(incidentId, { assigneeId: 'hsse', instruction: 'B', actorName: 'Sec' });
+  const record = store.getStoredVerification(incidentId);
+  assert.equal(record.verificationRequested, false);
+  assert.match(record.postponedNotice.reason, /assign tindak lanjut baru/);
+  assert.equal(record.entries.at(-1).kind, 'postpone');
+  // Petugas tidak bisa lagi mengirim verifikasi yang sudah ditunda.
+  assert.equal(submitIncidentVerification(incidentId, VERIFY).ok, false);
+
+  // Permintaan verifikasi baru menghapus notifikasi penundaan.
+  const b = store.getStoredFollowUps(incidentId).at(-1);
+  approveFlow(incidentId, b.id);
+  requestIncidentVerification(incidentId, { actorName: 'Sec' });
+  assert.equal(store.getStoredVerification(incidentId).postponedNotice, null);
+});

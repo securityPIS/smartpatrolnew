@@ -74,6 +74,13 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
     (`submitIncidentVerification(..., { bySecurity: true })`). Sesuai → semua Done + Closed.
   - Belum sesuai → `awaitingSecurityDecision`; PIC Security: `returnFollowUpToPic`, assign baru,
     `requestReverification`, atau Unsolve. Assign baru / kembalikan ke PIC membatalkan permintaan verifikasi.
+- Label status per POV role (`getFollowUpStatusView` / `getIncidentStatusView` di store): pola **Need …**
+  (giliran role itu, badge terang + "Your action") vs **Waiting …** (menunggu pihak lain, redup). Contoh:
+  assign → Security "Waiting Action", PIC terkait "Need Action", Petugas "In Progress"; Need Review ↔
+  Waiting Review; revisi → Waiting Revision ↔ Need Revision; Approved (Petugas: Work Done). Header temuan:
+  Need Assign / In Progress (x/y) / Need Decision / Waiting|Need Verification / Waiting Decision / Closed / Unsolved.
+- Assign baru atau Kembalikan ke PIC saat Need Verification → permintaan verifikasi otomatis DITUNDA
+  (entry `postpone`, `postponedNotice`) dan petugas melihat kartu "Verification Postponed" + alasannya.
 - Patroli (`PatrolPage` + `PatrolNfcChoiceSheet`): temuan patroli di titik (kapal+nama) yang belum
   Closed/Unsolve = OPEN (`isPatrolTemuanOpen`) → pilihan tap jadi TEMUAN BARU / UPDATE TEMUAN (berlaku
   juga untuk tap NFC asli). Update Temuan membuka detail temuan (`patrolUpdateIntentAt`) langsung ke form

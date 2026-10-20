@@ -9,7 +9,8 @@ Dependensi: React useSyncExternalStore, followUpPdf (nama file dokumen), shipChe
 Main Functions: useIncidentFollowUps, useIncidentVerification, getIncidentVerificationState,
                 assignFollowUp, submitFollowUpUpdate, submitSecurityReview, returnFollowUpToPic,
                 requestIncidentVerification, submitIncidentVerification, requestReverification, unsolveIncident,
-                isPatrolTemuanOpen, getCheckpointReferenceOverride, seedDemoFollowUps.
+                isPatrolTemuanOpen, getCheckpointReferenceOverride, seedDemoFollowUps,
+                getFollowUpStatusView, getIncidentStatusView (label status per POV role).
 Side Effects: Hanya state modul di memori; hilang saat aplikasi di-restart (sengaja, versi tampilan).
 */
 
@@ -143,7 +144,8 @@ export function useIncidentClosure(incidentId) {
 }
 
 // verificationRequested: PIC Security sudah memilih Need Verification ke petugas security.
-const EMPTY_VERIFICATION = Object.freeze({ entries: EMPTY_LIST, awaitingSecurityDecision: false, verificationRequested: false });
+// postponedNotice: { at, reason, actorName } — notifikasi ke petugas bahwa verifikasi ditunda.
+const EMPTY_VERIFICATION = Object.freeze({ entries: EMPTY_LIST, awaitingSecurityDecision: false, verificationRequested: false, postponedNotice: null });
 
 export function useIncidentVerification(incidentId) {
   const key = String(incidentId || '');
@@ -158,11 +160,22 @@ function updateIncidentVerification(incidentId, updater) {
 }
 
 // Tindak lanjut dibuka lagi (assign baru / kembalikan ke PIC) → penolakan verifikasi selesai dan
-// permintaan verifikasi lama batal; setelah semua Approved lagi PIC Security memutuskan ulang.
-function resetVerificationDecision(incidentId) {
+// permintaan verifikasi lama otomatis batal; setelah semua Approved lagi PIC Security memutuskan ulang.
+// Bila petugas sedang diminta verifikasi, mereka mendapat notifikasi "verifikasi ditunda".
+function resetVerificationDecision(incidentId, { postponeReason = '', actorName = '' } = {}) {
   const current = verificationsByIncident.get(String(incidentId || ''));
   if (!current?.awaitingSecurityDecision && !current?.verificationRequested) return;
-  updateIncidentVerification(incidentId, (record) => ({ ...record, awaitingSecurityDecision: false, verificationRequested: false }));
+  const isPostponed = Boolean(current.verificationRequested);
+  const at = new Date().toISOString();
+  updateIncidentVerification(incidentId, (record) => ({
+    ...record,
+    entries: isPostponed
+      ? [...record.entries, createEntry('postpone', { actorName, actorRole: 'PIC Security', comment: postponeReason, at })]
+      : record.entries,
+    awaitingSecurityDecision: false,
+    verificationRequested: false,
+    postponedNotice: isPostponed ? { at, reason: postponeReason, actorName } : record.postponedNotice,
+  }));
 }
 
 export const INCIDENT_VERIFICATION_STATE = {
@@ -210,7 +223,10 @@ export function assignFollowUp(incidentId, { assigneeId, instruction, photoUrl, 
     entries: [createEntry('assign', { actorName, actorRole: 'PIC Security', comment: instruction, photoUrl, at })],
   };
   updateIncidentFollowUps(incidentId, (items) => [...items, followUp]);
-  resetVerificationDecision(incidentId);
+  resetVerificationDecision(incidentId, {
+    actorName,
+    postponeReason: `Verifikasi ditunda karena PIC Security meng-assign tindak lanjut baru ke ${getAssigneeMeta(assigneeId, actorName).label}.`,
+  });
   return followUp;
 }
 
@@ -242,7 +258,29 @@ export function returnFollowUpToPic(incidentId, followUpId, { comment, actorName
     status: FOLLOW_UP_STATUS.NEED_ACTION,
     entries: [...item.entries, createEntry('return', { actorName, actorRole: 'PIC Security', comment, verdict: 'rejected' })],
   }));
-  resetVerificationDecision(incidentId);
+  const followUp = (followUpsByIncident.get(String(incidentId || '')) || EMPTY_LIST).find((item) => item.id === followUpId);
+  resetVerificationDecision(incidentId, {
+    actorName,
+    postponeReason: `Verifikasi ditunda karena PIC Security mengembalikan tindak lanjut ke ${getAssigneeMeta(followUp?.assigneeId, actorName).label}.`,
+  });
+}
+
+// Pembacaan langsung (non-React) untuk test & logika di luar komponen.
+export function getStoredFollowUps(incidentId) {
+  return followUpsByIncident.get(String(incidentId || '')) || EMPTY_LIST;
+}
+
+export function getStoredFollowUp(incidentId, followUpId) {
+  return getStoredFollowUps(incidentId).find((item) => item.id === followUpId) || null;
+}
+
+export function getStoredVerification(incidentId) {
+  return verificationsByIncident.get(String(incidentId || '')) || EMPTY_VERIFICATION;
+}
+
+// True bila petugas sedang diminta verifikasi (assign baru / kembalikan ke PIC akan menundanya).
+export function isVerificationRequested(incidentId) {
+  return Boolean(verificationsByIncident.get(String(incidentId || ''))?.verificationRequested);
 }
 
 // PIC Security memilih NEED VERIFICATION setelah semua tindak lanjut Approved → notifikasi ke semua
@@ -254,6 +292,7 @@ export function requestIncidentVerification(incidentId, { comment = '', actorNam
     ...record,
     entries: [...record.entries, createEntry('request', { actorName, actorRole: 'PIC Security', comment })],
     verificationRequested: true,
+    postponedNotice: null,
   }));
   return true;
 }
@@ -274,6 +313,7 @@ export function submitIncidentVerification(incidentId, { approved, comment, phot
     entries: [...record.entries, entry],
     awaitingSecurityDecision: !approved,
     verificationRequested: false,
+    postponedNotice: null,
   }));
   if (!approved) return { ok: true, closed: false };
 
@@ -289,6 +329,7 @@ export function requestReverification(incidentId, { comment, actorName }) {
     entries: [...record.entries, createEntry('reverify', { actorName, actorRole: 'PIC Security', comment })],
     awaitingSecurityDecision: false,
     verificationRequested: true,
+    postponedNotice: null,
   }));
 }
 
@@ -377,6 +418,7 @@ export function seedDemoFollowUps(incident, { securityName }) {
 }
 
 const VERIFICATION_LOG_HEADLINE = {
+  postpone: 'Verifikasi petugas DITUNDA otomatis — notifikasi dikirim ke petugas security kapal',
   request: 'PIC Security memilih NEED VERIFICATION — notifikasi verifikasi dikirim ke petugas security kapal',
   reverify: 'PIC Security meminta verifikasi ulang ke petugas security kapal',
 };
@@ -460,4 +502,95 @@ export function formatFollowUpTimestamp(isoValue) {
     date: date.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Jakarta' }),
     time: date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }),
   };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Label status per POV role. Pola: "Need …" = giliran role itu bertindak, "Waiting …" = menunggu
+// pihak lain, sisanya status akhir (sama untuk semua role).
+// tone: 'action' (badge terang), 'waiting' (redup), 'approved', 'done', 'unsolved', 'rejected'.
+export const STATUS_VIEWER = { SECURITY: 'security', ASSIGNEE: 'assignee', PIC: 'pic', OFFICER: 'officer' };
+
+function getNeedActionKind(followUp) {
+  const lastEntry = followUp.entries?.[followUp.entries.length - 1];
+  if (!lastEntry) return 'fresh';
+  if (lastEntry.kind === 'return' || (lastEntry.kind === 'review' && lastEntry.verdict === 'rejected')) return 'revision';
+  if (lastEntry.kind === 'review' && lastEntry.planConfirmed) return 'plan';
+  return 'fresh';
+}
+
+export function getFollowUpViewer(followUp, simRole) {
+  // PIC Security yang assign ke diri sendiri: mengerjakan (assignee) sekaligus me-review.
+  if (simRole === SECURITY_ASSIGNEE_ID && followUp.status === FOLLOW_UP_STATUS.NEED_REVIEW) return STATUS_VIEWER.SECURITY;
+  if (simRole === followUp.assigneeId) return STATUS_VIEWER.ASSIGNEE;
+  if (simRole === SECURITY_ASSIGNEE_ID) return STATUS_VIEWER.SECURITY;
+  return STATUS_VIEWER.OFFICER;
+}
+
+export function getFollowUpStatusView(followUp, simRole) {
+  const viewer = getFollowUpViewer(followUp, simRole);
+  const isSecurity = viewer === STATUS_VIEWER.SECURITY;
+  const isAssignee = viewer === STATUS_VIEWER.ASSIGNEE;
+  switch (followUp.status) {
+    case FOLLOW_UP_STATUS.NEED_ACTION: {
+      const kind = getNeedActionKind(followUp);
+      const note = kind === 'plan' ? 'Plan Approved' : '';
+      if (kind === 'revision') {
+        if (isAssignee) return { label: 'Need Revision', tone: 'action', note };
+        if (isSecurity) return { label: 'Waiting Revision', tone: 'waiting', note };
+      } else {
+        if (isAssignee) return { label: 'Need Action', tone: 'action', note };
+        if (isSecurity) return { label: 'Waiting Action', tone: 'waiting', note };
+      }
+      return { label: 'In Progress', tone: 'waiting', note: '' };
+    }
+    case FOLLOW_UP_STATUS.NEED_REVIEW:
+      if (isSecurity) return { label: 'Need Review', tone: 'action', note: '' };
+      if (isAssignee) return { label: 'Waiting Review', tone: 'waiting', note: '' };
+      return { label: 'In Progress', tone: 'waiting', note: '' };
+    case FOLLOW_UP_STATUS.APPROVED:
+      return { label: isSecurity || isAssignee ? 'Approved' : 'Work Done', tone: 'approved', note: '' };
+    case FOLLOW_UP_STATUS.DONE:
+      return { label: 'Done', tone: 'done', note: '' };
+    case FOLLOW_UP_STATUS.UNSOLVED:
+      return { label: 'Unsolved', tone: 'unsolved', note: '' };
+    default:
+      return { label: followUp.status, tone: 'waiting', note: '' };
+  }
+}
+
+export function getIncidentViewer(simRole) {
+  if (simRole === SECURITY_ASSIGNEE_ID) return STATUS_VIEWER.SECURITY;
+  if (simRole === REPORTER_ROLE_ID) return STATUS_VIEWER.OFFICER;
+  return STATUS_VIEWER.PIC;
+}
+
+export function getIncidentStatusView(state, simRole, { approvedCount = 0, total = 0, myTaskCount = 0 } = {}) {
+  const viewer = getIncidentViewer(simRole);
+  const isSecurity = viewer === STATUS_VIEWER.SECURITY;
+  const isOfficer = viewer === STATUS_VIEWER.OFFICER;
+  const S = INCIDENT_VERIFICATION_STATE;
+  switch (state) {
+    case S.NO_FOLLOW_UP:
+      if (isSecurity) return { label: 'Need Assign', tone: 'action' };
+      return { label: 'Reported', tone: 'waiting' };
+    case S.IN_PROGRESS:
+      if (isSecurity) return { label: `In Progress (${approvedCount}/${total})`, tone: 'waiting' };
+      if (!isOfficer && myTaskCount > 0) return { label: `Your Tasks: ${myTaskCount}`, tone: 'action' };
+      return { label: 'In Progress', tone: 'waiting' };
+    case S.READY:
+      if (isSecurity) return { label: 'Need Decision', tone: 'action' };
+      return isOfficer ? { label: 'In Progress', tone: 'waiting' } : { label: 'Waiting Decision', tone: 'waiting' };
+    case S.AWAITING_VERIFICATION:
+      if (isOfficer) return { label: 'Need Verification', tone: 'action' };
+      return { label: 'Waiting Verification', tone: 'waiting' };
+    case S.AWAITING_SECURITY:
+      if (isSecurity) return { label: 'Need Decision', tone: 'rejected' };
+      return { label: 'Waiting Decision', tone: 'waiting' };
+    case S.CLOSED:
+      return { label: 'Closed', tone: 'done' };
+    case S.UNSOLVED:
+      return { label: 'Unsolved', tone: 'unsolved' };
+    default:
+      return { label: state, tone: 'waiting' };
+  }
 }

@@ -11,11 +11,10 @@ Side Effects: Mengubah store dummy di memori dan membuka PDF; tidak menyentuh da
 */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Ban, Camera, CheckCircle2, ChevronDown, ClipboardList, Eye, FileText, ImageIcon, RotateCcw, Send, ShieldAlert, ShieldCheck, UserCheck, X, XCircle } from 'lucide-react';
+import { Ban, Bell, Camera, CheckCircle2, ChevronDown, ClipboardList, Eye, FileText, ImageIcon, RotateCcw, Send, ShieldAlert, ShieldCheck, UserCheck, X, XCircle } from 'lucide-react';
 import AsyncImage from '../AsyncImage';
 import {
   FOLLOW_UP_STATUS,
-  FOLLOW_UP_STATUS_META,
   INCIDENT_VERIFICATION_STATE,
   PIC_FUNCTION_OPTIONS,
   REPORTER_ROLE_ID,
@@ -23,7 +22,10 @@ import {
   assignFollowUp,
   formatFollowUpTimestamp,
   getAssigneeMeta,
+  getFollowUpStatusView,
+  getIncidentStatusView,
   getIncidentVerificationState,
+  isVerificationRequested,
   getUnsolveReferencePhotoUrl,
   requestIncidentVerification,
   requestReverification,
@@ -167,9 +169,22 @@ function DocumentCard({ fileName, onOpen, note }) {
   );
 }
 
-function StatusBadge({ status }) {
-  const meta = FOLLOW_UP_STATUS_META[status] || FOLLOW_UP_STATUS_META[FOLLOW_UP_STATUS.NEED_ACTION];
-  return <span className={`text-[9px] px-2 py-1 border rounded font-black tracking-widest uppercase whitespace-nowrap ${meta.badgeClass}`}>{meta.label}</span>;
+// Warna badge per tone status POV: 'action' (giliran role ini) terang, 'waiting' redup.
+const STATUS_TONE_CLASS = {
+  action: 'bg-emerald-500/15 border-emerald-400/70 text-emerald-200',
+  waiting: 'bg-slate-500/10 border-slate-600/70 text-slate-300',
+  approved: 'bg-teal-500/10 border-teal-500/60 text-teal-300',
+  done: 'bg-emerald-500/10 border-emerald-500/60 text-emerald-300',
+  unsolved: 'bg-orange-500/10 border-orange-500/60 text-orange-300',
+  rejected: 'bg-rose-500/15 border-rose-400/70 text-rose-200',
+};
+
+function StatusBadge({ view }) {
+  return (
+    <span className={`text-[9px] px-2 py-1 border rounded font-black tracking-widest uppercase whitespace-nowrap ${STATUS_TONE_CLASS[view.tone] || STATUS_TONE_CLASS.waiting}`}>
+      {view.label}
+    </span>
+  );
 }
 
 export function FollowUpToast({ toast, onDismiss }) {
@@ -243,6 +258,7 @@ function AssignFollowUpModal({ incident, securityName, nextSequence, onClose, on
 
   const handleSubmit = () => {
     if (!canSubmit) return;
+    const postponedVerification = isVerificationRequested(incident.id);
     assignFollowUp(incident.id, {
       assigneeId,
       instruction: instruction.trim(),
@@ -250,7 +266,7 @@ function AssignFollowUpModal({ incident, securityName, nextSequence, onClose, on
       document: { fileName, generatedAt: new Date().toISOString() },
       actorName: securityName,
     });
-    onAssigned(assignee);
+    onAssigned(assignee, { postponedVerification });
   };
 
   return (
@@ -364,11 +380,11 @@ function ReviewFollowUpModal({ incident, followUp, sequence, securityName, onClo
           <textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={3} placeholder={approved ? 'Contoh: rencana disetujui, kabari setelah pekerjaan selesai.' : 'Jelaskan apa yang belum sesuai...'} className={TEXTAREA_CLASS} />
           {approved && (
             <div className="text-[10px] mt-2 ml-1 space-y-1">
-              <p className="text-sky-300"><span className="font-bold">Konfirmasi Rencana</span>: rencana tindakan PIC fungsi disetujui. Status kembali Need Action sampai pekerjaan selesai dan diupdate lagi.</p>
+              <p className="text-sky-300"><span className="font-bold">Konfirmasi Rencana</span>: rencana tindakan PIC fungsi disetujui. Anda melihat Waiting Action (Plan Approved), PIC fungsi melihat Need Action sampai pekerjaan selesai dan diupdate lagi.</p>
               <p className="text-teal-300"><span className="font-bold">Approve</span>: pekerjaan selesai. Setelah semua tindak lanjut Approved, PIC Security memilih Unsolve atau Need Verification.</p>
             </div>
           )}
-          {!approved && <p className="text-[10px] text-amber-300 mt-2 ml-1">Status kembali menjadi Need Action untuk ditindaklanjuti ulang.</p>}
+          {!approved && <p className="text-[10px] text-amber-300 mt-2 ml-1">Anda melihat Waiting Revision, PIC fungsi melihat Need Revision untuk ditindaklanjuti ulang.</p>}
         </div>
       )}
     </FollowUpModal>
@@ -426,8 +442,9 @@ function ReturnFollowUpModal({ incident, followUp, sequence, securityName, onClo
 
   const handleSubmit = () => {
     if (!canSubmit) return;
+    const postponedVerification = isVerificationRequested(incident.id);
     returnFollowUpToPic(incident.id, followUp.id, { comment: comment.trim(), actorName: securityName });
-    onSubmitted(assignee);
+    onSubmitted(assignee, { postponedVerification });
   };
 
   return (
@@ -439,7 +456,7 @@ function ReturnFollowUpModal({ incident, followUp, sequence, securityName, onClo
       <div>
         <label className={LABEL_CLASS}>Apa yang harus diperbaiki? <span className="text-rose-400">*</span></label>
         <textarea autoFocus value={comment} onChange={(event) => setComment(event.target.value)} rows={3} placeholder="Jelaskan apa yang perlu dikerjakan ulang..." className={TEXTAREA_CLASS} />
-        <p className="text-[10px] text-amber-300 mt-2 ml-1">Status tindak lanjut kembali Need Action.</p>
+        <p className="text-[10px] text-amber-300 mt-2 ml-1">PIC terkait melihat status Need Revision. Bila petugas sedang diminta verifikasi, verifikasi otomatis ditunda.</p>
       </div>
     </FollowUpModal>
   );
@@ -525,7 +542,7 @@ function UnsolveIncidentModal({ incident, followUps, securityName, onClose, onSu
           {openFollowUps.map((followUp) => (
             <div key={followUp.id} className="flex items-center justify-between gap-2 text-xs">
               <span className="text-cyan-100 truncate">#{followUps.indexOf(followUp) + 1} · {getAssigneeMeta(followUp.assigneeId, securityName).label}</span>
-              <span className="flex items-center gap-1 shrink-0"><StatusBadge status={followUp.status} /><span className="text-cyan-700">→</span><StatusBadge status={FOLLOW_UP_STATUS.UNSOLVED} /></span>
+              <span className="flex items-center gap-1 shrink-0"><StatusBadge view={getFollowUpStatusView(followUp, SECURITY_ASSIGNEE_ID)} /><span className="text-cyan-700">→</span><StatusBadge view={{ label: 'Unsolved', tone: 'unsolved' }} /></span>
             </div>
           ))}
         </div>
@@ -583,7 +600,7 @@ export function FollowUpAssignCard({ incident, followUps, simRole, securityName,
           {followUps.map((followUp, index) => (
             <div key={followUp.id} className="flex items-center justify-between gap-2 text-xs">
               <span className="text-cyan-100 truncate">#{index + 1} · {getAssigneeMeta(followUp.assigneeId, securityName).label}</span>
-              <StatusBadge status={followUp.status} />
+              <StatusBadge view={getFollowUpStatusView(followUp, simRole)} />
             </div>
           ))}
         </div>
@@ -603,11 +620,14 @@ export function FollowUpAssignCard({ incident, followUps, simRole, securityName,
           securityName={securityName}
           nextSequence={followUps.length + 1}
           onClose={() => setShowAssignForm(false)}
-          onAssigned={(assignee) => {
+          onAssigned={(assignee, { postponedVerification }) => {
             setShowAssignForm(false);
-            onToast(assignee.id === SECURITY_ASSIGNEE_ID
+            const assignedMessage = assignee.id === SECURITY_ASSIGNEE_ID
               ? 'Tindak lanjut ditugaskan ke diri sendiri (PIC Security).'
-              : `Notifikasi terkirim ke ${assignee.label}.\nStatus tindak lanjut: Need Action.`);
+              : `Notifikasi terkirim ke ${assignee.label}.\nStatus Anda: Waiting Action.`;
+            onToast(postponedVerification
+              ? `${assignedMessage}\nVerifikasi petugas otomatis ditunda — notifikasi terkirim ke petugas security kapal ${incident.shipName || 'ini'}.`
+              : assignedMessage);
           }}
         />
       )}
@@ -650,8 +670,9 @@ function FollowUpSection({ incident, followUp, sequence, simRole, securityName, 
   const assignee = getAssigneeMeta(followUp.assigneeId, securityName);
   const createdStamp = formatFollowUpTimestamp(followUp.createdAt);
   const { canUpdate, canReview, canReturn } = getFollowUpActions(followUp, simRole, isClosed);
-  // "Kembalikan ke PIC" adalah opsi, bukan tindakan wajib → tidak ditandai "perlu tindakan".
+  // "Kembalikan ke PIC" adalah opsi, bukan tindakan wajib → tidak ditandai "Your action".
   const hasAction = canUpdate || canReview;
+  const statusView = getFollowUpStatusView(followUp, simRole);
   const activityEntries = followUp.entries.filter((entry) => entry.kind !== 'assign');
 
   return (
@@ -663,8 +684,9 @@ function FollowUpSection({ incident, followUp, sequence, simRole, securityName, 
           <p className="text-[10px] text-cyan-600 truncate">{assignee.personName} · {createdStamp.date} {createdStamp.time}</p>
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
-          <StatusBadge status={followUp.status} />
-          {hasAction && <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-wider">Perlu tindakan Anda</span>}
+          <StatusBadge view={statusView} />
+          {statusView.note && <span className="text-[9px] font-bold text-sky-300 uppercase tracking-wider">{statusView.note}</span>}
+          {hasAction && <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-wider">Your action</span>}
         </div>
         <ChevronDown className={`w-4 h-4 text-cyan-600 shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
       </button>
@@ -770,6 +792,26 @@ function IncidentUnsolveCard({ unsolve, onPreviewPhoto }) {
       {unsolve.checkpointKey && unsolve.referencePhotoUrl && (
         <p className="text-[10px] text-emerald-300/90 flex items-center gap-1.5"><ImageIcon className="w-3 h-3 shrink-0" /> Foto kondisi awal titik diperbarui · tombol AMAN tersedia lagi.</p>
       )}
+    </div>
+  );
+}
+
+// Notifikasi ke petugas: permintaan verifikasi otomatis ditunda karena tindak lanjut dibuka lagi.
+function VerificationPostponedNotice({ notice, simRole, verifierTargetLabel }) {
+  const stamp = formatFollowUpTimestamp(notice.at);
+  const isOfficer = simRole === REPORTER_ROLE_ID;
+  return (
+    <div role={isOfficer ? 'alert' : undefined} className={`p-3.5 rounded-xl border flex items-start gap-3 ${isOfficer ? 'border-amber-500/50 bg-amber-500/10' : 'border-amber-900/50 bg-[#0b1229]/60'}`}>
+      <Bell className="w-5 h-5 text-amber-300 shrink-0 mt-0.5" />
+      <div className="min-w-0">
+        <p className="text-xs font-bold text-amber-200 uppercase tracking-widest">Verification Postponed</p>
+        <p className="text-[11px] text-cyan-100 mt-0.5">{notice.reason}</p>
+        <p className="text-[10px] text-cyan-600 mt-1">
+          {isOfficer
+            ? `Notifikasi dari ${notice.actorName || 'PIC Security'} · ${stamp.date} ${stamp.time}. Anda akan diminta verifikasi lagi setelah semua tindak lanjut selesai.`
+            : `Notifikasi terkirim ke ${verifierTargetLabel} · ${stamp.date} ${stamp.time}.`}
+        </p>
+      </div>
     </div>
   );
 }
@@ -909,6 +951,8 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
     const { canUpdate, canReview } = getFollowUpActions(followUp, simRole, isClosed);
     return canUpdate || canReview;
   }).length + (hasIncidentAction ? 1 : 0);
+  const myTaskCount = followUps.filter((followUp) => getFollowUpActions(followUp, simRole, isClosed).canUpdate).length;
+  const incidentStatusView = getIncidentStatusView(verificationState, simRole, { approvedCount, total: followUps.length, myTaskCount });
   const closeAction = () => setActiveAction(null);
 
   const handleSeedDemo = () => {
@@ -916,20 +960,26 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
     onToast('Data contoh tindak lanjut dimuat.');
   };
 
+  const showPostponedNotice = Boolean(verification?.postponedNotice)
+    && (verificationState === INCIDENT_VERIFICATION_STATE.IN_PROGRESS || verificationState === INCIDENT_VERIFICATION_STATE.READY);
+
   return (
     <div>
+      {showPostponedNotice && (
+        <div className="mb-3">
+          <VerificationPostponedNotice notice={verification.postponedNotice} simRole={simRole} verifierTargetLabel={verifierTargetLabel} />
+        </div>
+      )}
       <div className={`rounded-xl border bg-[#0b1229]/60 shadow-sm ${myActionCount > 0 ? 'border-emerald-500/40' : 'border-cyan-900/50'}`}>
         <button type="button" onClick={() => setIsListExpanded((value) => !value)} className="w-full p-3.5 flex items-center gap-3 text-left" aria-expanded={isListExpanded} aria-label="Daftar tindak lanjut">
           <ClipboardList className="w-4 h-4 text-cyan-400 shrink-0" />
           <div className="flex-1 min-w-0">
             <p className="text-xs font-bold text-cyan-400 uppercase tracking-widest">Tindak Lanjut ({followUps.length})</p>
-            <p className="text-[10px] text-cyan-600 mt-0.5">
-              {unsolve
-                ? <span className="text-orange-300">Unsolve · semua tindak lanjut ditutup</span>
-                : followUps.length === 0 ? 'Belum ada tindak lanjut' : `${approvedCount} approved · ${followUps.length - approvedCount} berjalan`}
-            </p>
+            <div className="mt-1 flex items-center gap-2 flex-wrap">
+              <StatusBadge view={incidentStatusView} />
+              {myActionCount > 0 && <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-wider">Your action: {myActionCount}</span>}
+            </div>
           </div>
-          {myActionCount > 0 && <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-wider shrink-0">{myActionCount} perlu tindakan</span>}
           <ChevronDown className={`w-4 h-4 text-cyan-600 shrink-0 transition-transform ${isListExpanded ? 'rotate-180' : ''}`} />
         </button>
 
@@ -987,7 +1037,7 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
           onClose={closeAction}
           onSubmitted={() => {
             closeAction();
-            onToast('Update terkirim. Status: Need Review — menunggu feedback PIC Security.');
+            onToast('Update terkirim. Status Anda: Waiting Review — menunggu feedback PIC Security.');
           }}
         />
       )}
@@ -1000,9 +1050,9 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
           onClose={closeAction}
           onSubmitted={({ approved, finalApproval }) => {
             closeAction();
-            if (!approved) onToast('Feedback terkirim. Status kembali ke Need Action.');
+            if (!approved) onToast('Feedback terkirim. Status Anda: Waiting Revision — PIC fungsi melihat Need Revision.');
             else if (finalApproval) onToast('Tindak lanjut di-approve. Petugas pelapor memverifikasi 1x setelah semua tindak lanjut Approved.');
-            else onToast('Rencana tindakan dikonfirmasi. Status: Need Action — menunggu penyelesaian dari PIC fungsi.');
+            else onToast('Rencana tindakan dikonfirmasi. Status Anda: Waiting Action (Plan Approved) — menunggu penyelesaian dari PIC fungsi.');
           }}
         />
       )}
@@ -1013,9 +1063,12 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
           sequence={activeAction.sequence}
           securityName={securityName}
           onClose={closeAction}
-          onSubmitted={(assignee) => {
+          onSubmitted={(assignee, { postponedVerification }) => {
             closeAction();
-            onToast(`Tindak lanjut dikembalikan ke ${assignee.label}. Status: Need Action.`);
+            const returnedMessage = `Tindak lanjut dikembalikan ke ${assignee.label}. Status Anda: Waiting Revision.`;
+            onToast(postponedVerification
+              ? `${returnedMessage}\nVerifikasi petugas otomatis ditunda — notifikasi terkirim ke ${verifierTargetLabel}.`
+              : returnedMessage);
           }}
         />
       )}

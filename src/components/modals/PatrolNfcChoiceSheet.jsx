@@ -81,7 +81,12 @@ export default function PatrolNfcChoiceSheet({ selection, openTemuan = [], refer
             {isSub && parentName && (
               <p className="text-[11px] text-sky-300 flex items-center gap-1 mb-0.5"><CornerDownRight className="w-3 h-3" /> Sub dari {parentName}</p>
             )}
-            <h3 id="nfc-choice-title" className="text-xl font-black text-white leading-tight">{item.name}</h3>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 id="nfc-choice-title" className="text-xl font-black text-white leading-tight">{item.name}</h3>
+              {referenceOverride && (
+                <span className="px-1.5 py-0.5 rounded border border-orange-500/60 bg-orange-500/10 text-orange-300 text-[10px] font-black uppercase tracking-widest">Unsolve</span>
+              )}
+            </div>
             {definition?.desc && <p className="text-sm text-cyan-400 mt-1">{definition.desc}</p>}
           </div>
 
@@ -109,10 +114,19 @@ export default function PatrolNfcChoiceSheet({ selection, openTemuan = [], refer
                   <div className="w-full aspect-video rounded-xl border border-dashed border-cyan-800 flex items-center justify-center text-xs text-cyan-700">Belum ada foto acuan</div>
                 )}
                 {referenceOverride && (
-                  <div className="mt-2 p-2.5 rounded-xl border border-orange-500/40 bg-orange-500/5">
+                  <div className="mt-2 p-3 rounded-xl border border-orange-500/40 bg-orange-500/5 space-y-2">
                     <p className="text-[10px] font-black uppercase tracking-widest text-orange-300 flex items-center gap-1"><Ban className="w-3.5 h-3.5" /> Temuan Unsolve · {formatUnsolveDate(referenceOverride.updatedAt)}</p>
-                    <p className="text-[11px] text-cyan-200 mt-1 whitespace-pre-wrap">{referenceOverride.note}</p>
-                    <p className="text-[10px] text-cyan-600 mt-1">Ditetapkan oleh {referenceOverride.actorName}. Kondisi ini menjadi acuan baru — laporkan AMAN bila tidak ada perubahan.</p>
+                    {referenceOverride.temuan?.deskripsi && (
+                      <div>
+                        <p className="text-[9px] font-bold uppercase tracking-widest text-cyan-600">Temuan awal{referenceOverride.temuan.date ? ` · ${referenceOverride.temuan.date} ${referenceOverride.temuan.time || ''}` : ''}{referenceOverride.temuan.reportedBy ? ` · ${referenceOverride.temuan.reportedBy}` : ''}</p>
+                        <p className="text-[11px] text-cyan-100 whitespace-pre-wrap">{referenceOverride.temuan.deskripsi}</p>
+                      </div>
+                    )}
+                    <div>
+                      <p className="text-[9px] font-bold uppercase tracking-widest text-cyan-600">Catatan Unsolve · PIC Security{referenceOverride.followUpCount ? ` · ${referenceOverride.followUpCount} tindak lanjut ditutup` : ''}</p>
+                      <p className="text-[11px] text-cyan-100 whitespace-pre-wrap">{referenceOverride.note}</p>
+                    </div>
+                    <p className="text-[10px] text-cyan-500">Ditetapkan oleh {referenceOverride.actorName}. Foto di atas adalah kondisi saat unsolve dan menjadi acuan baru — laporkan AMAN bila kondisinya tidak berubah.</p>
                   </div>
                 )}
                 <p className="text-[11px] text-cyan-600 mt-1.5">Bandingkan kondisi sekarang dengan foto ini, lalu ambil foto dari sudut yang sama.</p>

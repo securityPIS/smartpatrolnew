@@ -327,6 +327,9 @@ export function unsolveIncident(incident, { comment, photoUrl = null, actorName 
       incidentId: key,
       note,
       actorName,
+      // Ringkasan temuan awal untuk ditampilkan saat petugas tap titik ini.
+      temuan: { deskripsi: incident.deskripsi || '', date: incident.date || '', time: incident.time || '', reportedBy: incident.reportedBy || '' },
+      followUpCount: (followUpsByIncident.get(key) || EMPTY_LIST).length,
     });
   }
   emitChange();

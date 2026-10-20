@@ -81,4 +81,7 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
 - Item checkpoint pending tidak lagi punya badge "Tap NFC"/"Tanpa NFC"; diganti tombol "Simulasi Tap"
   (buka sheet tanpa verifikasi NFC; checklist terkunci → buka modal status shift; akun yang tak bisa
   patroli kapal ini melihat alasan, tombol lapor nonaktif). "+ Update" Riwayat Update hanya role Petugas.
+- Titik contoh "Pagar Dek Kiri (Contoh)" berstatus UNSOLVE selalu tampil paling atas di daftar checkpoint
+  (`demoUnsolveCheckpoint.js`, data dummy): klik → sheet info unsolve (temuan awal, catatan PIC Security,
+  foto kondisi saat unsolve) + AMAN/TEMUAN; pilihan hanya toast, tidak membuat laporan.
 - Store masih dummy in-memory (belum ke database).

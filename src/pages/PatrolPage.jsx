@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import CheckpointGroupToggle, { useCollapsedGroups } from '../components/CheckpointGroupToggle';
 import PatrolNfcChoiceSheet from '../components/modals/PatrolNfcChoiceSheet';
+import { FollowUpToast } from '../components/incidentFollowUp/FollowUpPanels';
+import { DEMO_UNSOLVE_CHECKPOINT } from '../components/incidentFollowUp/demoUnsolveCheckpoint';
 import { usePatrolNfcScan } from '../hooks/usePatrolNfcScan';
 import { openNfcSettings } from '../services/native/nfc';
 import { createCheckpointNameKey, normalizeShipCheckpointDefinitions } from '../utils/shipCheckpoints';
@@ -168,6 +170,8 @@ const PatrolPage = React.memo(function PatrolPage() {
   } = usePatrol();
   const { operationalShip, operationalShipName, shipsData } = useShips();
   const [nfcSelection, setNfcSelection] = React.useState(null);
+  const [demoToast, setDemoToast] = React.useState(null);
+  const dismissDemoToast = React.useCallback(() => setDemoToast(null), []);
   const { weatherInfo, weatherLoading, getWeatherDetail } = useWeather();
   const { setPreviewPhoto, selectedReportDetail } = useReports();
   const { selectedHistoryEntry, closeHistoryEntry } = useHistory();
@@ -269,6 +273,12 @@ const PatrolPage = React.memo(function PatrolPage() {
   const handleNfcChoice = React.useCallback((type) => {
     const selection = nfcSelection;
     if (!selection) return;
+    if (selection.demo) {
+      // Titik contoh (dummy): hanya simulasi, tidak membuat laporan patroli.
+      setNfcSelection(null);
+      setDemoToast({ id: Date.now(), message: `Simulasi: petugas memilih ${type === 'aman' ? 'AMAN' : 'TEMUAN'} di ${selection.item.name}.\nTitik contoh tidak membuat laporan.` });
+      return;
+    }
     if (type === 'aman' && getTemuanStateForItem(selection.item).openTemuan.length > 0) return;
     setNfcSelection(null);
     handleActionClick(selection.item.id, type, selection.verified
@@ -347,7 +357,7 @@ const PatrolPage = React.memo(function PatrolPage() {
                   <span className="text-[9px] uppercase tracking-widest text-yellow-300 border border-yellow-500/40 px-1.5 py-0.5 rounded" title="Masih ada temuan yang belum Closed/Unsolve">Temuan Open</span>
                 )}
                 {referencePhoto.isUnsolve && (
-                  <span className="text-[9px] uppercase tracking-widest text-orange-300 border border-orange-500/40 px-1.5 py-0.5 rounded" title="Foto acuan diperbarui dari temuan Unsolve">Acuan Unsolve</span>
+                  <span className="text-[9px] uppercase tracking-widest text-orange-300 border border-orange-500/40 px-1.5 py-0.5 rounded" title="Temuan di titik ini Unsolve; foto acuan diperbarui">Unsolve</span>
                 )}
               </div>
             )}
@@ -366,6 +376,34 @@ const PatrolPage = React.memo(function PatrolPage() {
           </div>
         </div>
       </div>
+    );
+  };
+
+  // Satu titik contoh berstatus UNSOLVE (data dummy) untuk simulasi info unsolve + AMAN/TEMUAN.
+  const renderDemoUnsolveItem = () => {
+    const demo = DEMO_UNSOLVE_CHECKPOINT;
+    return (
+      <button
+        type="button"
+        onClick={() => setNfcSelection({ item: demo.item, definition: demo.definition, verified: false, simulated: true, demo: true })}
+        className="w-full p-3 bg-[#0b1229] border border-orange-500/40 rounded-xl flex items-center gap-3 text-left hover:border-orange-400/70 transition-colors"
+        aria-label={`Buka titik contoh ${demo.item.name} (Unsolve)`}
+      >
+        <div className="w-12 h-12 shrink-0 rounded-lg overflow-hidden border border-orange-500/50">
+          <AsyncImage src={demo.override.referencePhotoUrl} alt="Kondisi saat unsolve" className="w-full h-full object-cover" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-bold text-white truncate">{demo.item.name}</p>
+          <div className="flex flex-wrap gap-1 mt-1">
+            <span className="text-[9px] uppercase tracking-widest text-orange-300 border border-orange-500/40 px-1.5 py-0.5 rounded">Unsolve</span>
+            <span className="text-[9px] uppercase tracking-widest text-fuchsia-300 border border-fuchsia-500/40 px-1.5 py-0.5 rounded">Contoh</span>
+          </div>
+        </div>
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-fuchsia-500/40 bg-fuchsia-500/10 text-fuchsia-200 shrink-0">
+          <Nfc className="w-3.5 h-3.5" />
+          <span className="text-[10px] font-bold uppercase tracking-wider">Simulasi Tap</span>
+        </span>
+      </button>
     );
   };
 
@@ -694,6 +732,7 @@ const PatrolPage = React.memo(function PatrolPage() {
                 )}
 
                 <div className="space-y-3 flex-1">
+                  {!isHistoryMode && !searchQuery && renderDemoUnsolveItem()}
                   {visibleCheckpoints.length === 0 && (
                     <p className="text-xs text-cyan-700 italic border border-dashed border-cyan-900/50 p-4 rounded-xl text-center">
                       {searchQuery ? `Titik patroli "${searchQuery}" tidak ditemukan.` : 'Belum ada titik patroli yang tersedia.'}
@@ -778,16 +817,18 @@ const PatrolPage = React.memo(function PatrolPage() {
        {nfcSelection && (
          <PatrolNfcChoiceSheet
            selection={nfcSelection}
-           openTemuan={getTemuanStateForItem(nfcSelection.item).openTemuan}
-           referenceOverride={getTemuanStateForItem(nfcSelection.item).override}
+           openTemuan={nfcSelection.demo ? [] : getTemuanStateForItem(nfcSelection.item).openTemuan}
+           referenceOverride={nfcSelection.demo ? DEMO_UNSOLVE_CHECKPOINT.override : getTemuanStateForItem(nfcSelection.item).override}
            parentName={nfcSelection.definition?.type === 'sub' ? definitionById.get(nfcSelection.definition.parentId)?.name : ''}
            onChoose={handleNfcChoice}
            onUpdateTemuan={handleUpdateOpenTemuan}
-           reportBlockedReason={canPatrolCurrentShip ? '' : 'Akun ini tidak ditugaskan patroli di kapal ini, jadi laporan Aman/Temuan tidak bisa dikirim. Login sebagai petugas kapal ini atau PIC untuk melapor.'}
+           reportBlockedReason={canPatrolCurrentShip || nfcSelection.demo ? '' : 'Akun ini tidak ditugaskan patroli di kapal ini, jadi laporan Aman/Temuan tidak bisa dikirim. Login sebagai petugas kapal ini atau PIC untuk melapor.'}
            onClose={() => setNfcSelection(null)}
            onPreviewPhoto={(url) => setPreviewPhoto({ url, author: `Foto acuan · ${nfcSelection.item.name}` })}
          />
        )}
+
+       <FollowUpToast toast={demoToast} onDismiss={dismissDemoToast} />
 
        {/* Right Pane: Detail Component */}
         <div className="hidden lg:block flex-1 border-l border-cyan-900/50 bg-[#070b19] shrink-0 overflow-hidden relative">

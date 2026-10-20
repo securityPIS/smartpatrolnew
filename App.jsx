@@ -31,6 +31,7 @@ import IncidentDetailModal from './src/components/modals/IncidentDetailModal';
 import AssignDueDatePopup from './src/components/modals/AssignDueDatePopup';
 import SOSAlertModal from './src/components/modals/SOSAlertModal';
 import ConfirmModal from './src/components/modals/ConfirmModal';
+import DemoModeBanner from './src/components/DemoModeBanner';
 import {
   ShipFormModal,
   ShipDocumentFormModal,
@@ -172,6 +173,7 @@ function AppShell() {
       <SideNav />
 
       <div className="flex-1 flex flex-col h-full overflow-hidden relative">
+        <DemoModeBanner />
         <Header />
 
         <main className="flex-1 overflow-y-auto pb-24 lg:pb-0 relative scrollbar-thin scrollbar-thumb-cyan-900/50">

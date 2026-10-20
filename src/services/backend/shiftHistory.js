@@ -6,7 +6,7 @@ Main Functions: subscribeToShiftHistoryEntries — fetch semua entri + subscribe
 Side Effects: Membuka channel Supabase Realtime; harus di-dispose saat komponen unmount.
 */
 
-import { ensureSupabaseClient } from './app';
+import { ensureSupabaseClient, isSupabaseConfigured } from './app';
 
 const SHIFT_HISTORY_TABLE = 'shift_history_entries';
 const SHIFT_HISTORY_LIMIT  = 500;
@@ -20,6 +20,8 @@ const SHIFT_HISTORY_LIMIT  = 500;
  * @returns {function} disposer — panggil untuk unsubscribe
  */
 export function subscribeToShiftHistoryEntries(callback, onError) {
+  // Tanpa backend (mode demo / build tanpa Supabase): tidak ada langganan realtime.
+  if (!isSupabaseConfigured) return () => {};
   const supabase = ensureSupabaseClient();
   let disposed = false;
 

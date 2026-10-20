@@ -2,15 +2,62 @@
 Tujuan: Menyajikan form login Supabase Auth dan registrasi publik terisolasi SmartPatrol SQL.
 Caller: App shell saat belum ada sesi user operasional aktif.
 Dependensi: Auth context runtime, ikon Lucide, dan AsyncImage untuk foto onboarding.
-Main Functions: Login user operasional, kirim registrasi publik, dan upload foto profil onboarding.
+Main Functions: Login user operasional, kirim registrasi publik, upload foto profil onboarding, dan
+                masuk dengan akun demo (petugas/admin, data dummy tidak disimpan).
 Side Effects: Memicu handler auth/register context serta menyimpan foto onboarding ke state form.
 */
 
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AppContextRuntime';
-import { Shield, Ship, Eye, EyeOff, Camera, AlertTriangle, X } from 'lucide-react';
+import { Shield, Ship, Eye, EyeOff, Camera, AlertTriangle, X, UserCog, UserRound, FlaskConical } from 'lucide-react';
+import { DEMO_ACCOUNTS, enterDemoMode, exitDemoMode, isDemoMode } from '../services/demoMode';
 import { acknowledgeLatestAutoLogout, readAutoLogoutLog } from '../utils/autoLogoutLog';
 import AsyncImage from '../components/AsyncImage';
+
+const DEMO_ACCOUNT_ICONS = { petugas: UserRound, admin: UserCog };
+
+// Pilihan masuk dengan akun dummy. Aplikasi dimuat ulang ke mode demo: tanpa Supabase dan tanpa
+// menyimpan data apa pun, sehingga aman dipakai untuk mencoba alur.
+function DemoAccountPicker() {
+  if (isDemoMode) {
+    return (
+      <div className="mt-6 p-4 rounded-2xl border border-fuchsia-500/40 bg-fuchsia-500/5 space-y-2">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300 flex items-center gap-1.5"><FlaskConical className="w-3.5 h-3.5" /> Mode Demo Aktif</p>
+        <p className="text-[11px] text-cyan-300">Login akun asli tidak tersedia di mode demo.</p>
+        <button type="button" onClick={exitDemoMode} className="w-full py-3 rounded-xl border border-cyan-700 text-cyan-200 hover:bg-cyan-900/30 transition-all">
+          <span className="text-xs font-black uppercase tracking-widest">Kembali ke Login Biasa</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-6 pt-5 border-t border-cyan-900/50 space-y-3">
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300 flex items-center gap-1.5"><FlaskConical className="w-3.5 h-3.5" /> Masuk dengan Akun Demo</p>
+        <p className="text-[11px] text-cyan-600 mt-1">Memakai data dummy, tidak membaca atau menulis data server, dan tidak disimpan — semua perubahan hilang saat keluar atau muat ulang.</p>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {Object.values(DEMO_ACCOUNTS).map((account) => {
+          const Icon = DEMO_ACCOUNT_ICONS[account.key] || UserRound;
+          return (
+            <button
+              key={account.key}
+              type="button"
+              onClick={() => enterDemoMode(account.key)}
+              className="p-3 rounded-xl border border-fuchsia-500/40 bg-fuchsia-500/5 hover:bg-fuchsia-500/15 text-left transition-all"
+              aria-label={`Masuk sebagai ${account.label}`}
+            >
+              <Icon className="w-5 h-5 text-fuchsia-300 mb-1.5" />
+              <span className="block text-xs font-black text-fuchsia-100">{account.label}</span>
+              <span className="block text-[10px] text-cyan-600 mt-0.5">{account.description}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function formatAutoLogoutTime(isoValue) {
   const date = new Date(isoValue);
@@ -267,6 +314,8 @@ export default function LoginPage() {
             {authBusy ? <span className="animate-pulse">Memproses...</span> : authMode === 'login' ? 'Login' : 'Kirim Registrasi'}
           </button>
         </div>
+
+        {authMode === 'login' && <DemoAccountPicker />}
 
         <div className="mt-8 text-center">
           <p className="text-[10px] text-cyan-700">SmartPatrol By HSSE - Security III</p>

@@ -6,7 +6,7 @@ Main Functions: Subscribe insiden, upsert payload insiden idempotent, append pro
 Side Effects: Membaca/menulis tabel incidents serta mengantre mutation offline bila jaringan gagal.
 */
 
-import { ensureSupabaseClient } from './app';
+import { ensureSupabaseClient, isSupabaseConfigured } from './app';
 import { enqueueOutboxMutation, registerOutboxHandler } from './outbox';
 import { deleteStorageAsset } from './assets';
 
@@ -121,6 +121,8 @@ registerOutboxHandler('sos_alert.delete', async ({ sosId }) => {
 });
 
 export function subscribeToIncidents(callback, onError) {
+  // Tanpa backend (mode demo / build tanpa Supabase): tidak ada langganan realtime.
+  if (!isSupabaseConfigured) return () => {};
   const supabase = ensureSupabaseClient();
   let disposed = false;
 

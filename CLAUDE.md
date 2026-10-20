@@ -51,6 +51,16 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
 - `npm install` dulu (container fresh sering belum ada deps; gejala: `vite: not found`).
 - `npm run build` (vite). `npm run test:security` (15 test). Test halaman: 49 test.
 
+## Mode demo (akun dummy) — `src/services/demoMode.js`, `src/data/demoData.js`
+- LoginPage: "Masuk dengan Akun Demo" (Petugas/Admin) → reload ke `?demo=petugas|admin`. Banner ungu
+  `DemoModeBanner` + tombol Keluar (logout di demo = `exitDemoMode()`, reload tanpa param).
+- Isolasi: `isSupabaseConfigured=false` (tanpa client/auth/cloud/outbox worker), persisted state & sesi
+  tidak dibaca/ditulis localStorage, foto tidak ke IndexedDB (data URL di memori), outbox no-op.
+  Dataset: `createDemoUsers/createDemoShips` lewat `getMockUsersList/getInitialShipsData`. Kapal demo WAJIB
+  punya `personnel` (rekonsiliasi shipAssigned) agar petugas tidak ter-logout "off-duty".
+- Fungsi `subscribeTo*` di services/backend harus return noop bila `!isSupabaseConfigured` (dulu throw →
+  crash dashboard admin). Satu-satunya request backend di demo: trusted time `server-time` (baca jam saja).
+
 ## Titik checkpoint main/sub + NFC
 - Definisi titik ada di `ships.customCheckpoints` (model & normalisasi: `src/utils/shipCheckpoints.js`):
   `type` main/sub, `parentId`, `nfcTagId`, `referencePhotoUrl` (foto kondisi awal, wajib bersama NFC).

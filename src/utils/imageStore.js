@@ -6,6 +6,8 @@ Main Functions: saveImageToDB (simpan satu foto), saveImageVariantsToDB (simpan 
 Side Effects: Membuka/menulis/menghapus object store IndexedDB 'smartpatrol-images'.
 */
 
+import { isDemoMode } from '../services/demoMode';
+
 const DB_NAME = 'smartpatrol-images';
 const STORE_NAME = 'photos';
 
@@ -42,6 +44,8 @@ function openDB() {
 }
 
 export async function saveImageToDB(dataUrl) {
+  // Mode demo: foto tidak disimpan ke perangkat; cukup data URL di memori.
+  if (isDemoMode) return typeof dataUrl === 'string' && dataUrl.startsWith('data:') ? dataUrl : null;
   try {
     const db = await openDB();
     const key = `idb://img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -71,6 +75,11 @@ hero/thumb yang tidak tersedia otomatis fallback ke key foto penuh.
 */
 export async function saveImageVariantsToDB({ full, hero, thumb }) {
   if (!full) return null;
+  if (isDemoMode) {
+    const asDataUrl = (value) => (typeof value === 'string' && value.startsWith('data:') ? value : null);
+    const photoUrl = asDataUrl(full);
+    return photoUrl ? { photoUrl, heroUrl: asDataUrl(hero) || photoUrl, thumbUrl: asDataUrl(thumb) || photoUrl } : null;
+  }
   try {
     const db = await openDB();
     const baseKey = `idb://img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;

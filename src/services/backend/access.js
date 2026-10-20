@@ -7,7 +7,7 @@ Side Effects: Menulis tabel pending_registrations/profiles, memanggil Edge Funct
 */
 
 import { sanitizeEmail, sanitizePhone, sanitizeText, sanitizeUrl } from '../../utils/sanitize';
-import { ensureSupabaseClient } from './app';
+import { ensureSupabaseClient, isSupabaseConfigured } from './app';
 import { buildRegistrationAssetPath, uploadRegistrationPhotoAsset } from './assets';
 import { enqueueOutboxMutation, registerOutboxHandler } from './outbox';
 
@@ -142,6 +142,8 @@ registerOutboxHandler('pending_registration.upsert', async (payload) => {
 });
 
 export function subscribeToPendingRegistrations(callback, onError) {
+  // Tanpa backend (mode demo / build tanpa Supabase): tidak ada langganan realtime.
+  if (!isSupabaseConfigured) return () => {};
   const supabase = ensureSupabaseClient();
   let disposed = false;
 

@@ -8,6 +8,7 @@ Side Effects: Membuat sesi Supabase browser, memasang listener online untuk retr
 
 import { createClient } from '@supabase/supabase-js';
 import { startSqlOutboxWorker } from './outbox';
+import { isDemoMode } from '../demoMode';
 
 const DEFAULT_LOCAL_SUPABASE_URL = 'http://127.0.0.1:54321';
 
@@ -19,10 +20,14 @@ function readEnvValue(value, fallback = '') {
 const supabaseUrl = readEnvValue(import.meta.env.VITE_SUPABASE_URL, DEFAULT_LOCAL_SUPABASE_URL);
 const supabaseAnonKey = readEnvValue(import.meta.env.VITE_SUPABASE_ANON_KEY);
 
-const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey && !supabaseAnonKey.includes('replace-with'));
-const supabaseConfigSource = isSupabaseConfigured
-  ? (import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY ? 'vite-env' : 'local-default')
-  : 'missing';
+// Mode demo: Supabase sengaja dimatikan total (tanpa client, auth, maupun sinkron cloud) agar akun
+// dummy tidak bisa membaca/menulis data asli; aplikasi berjalan di jalur "tanpa backend".
+const isSupabaseConfigured = !isDemoMode && Boolean(supabaseUrl && supabaseAnonKey && !supabaseAnonKey.includes('replace-with'));
+const supabaseConfigSource = isDemoMode
+  ? 'demo'
+  : isSupabaseConfigured
+    ? (import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY ? 'vite-env' : 'local-default')
+    : 'missing';
 
 const supabase = isSupabaseConfigured
   ? createClient(supabaseUrl, supabaseAnonKey, {
@@ -40,7 +45,7 @@ const supabase = isSupabaseConfigured
   })
   : null;
 
-if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined' && !isDemoMode) {
   startSqlOutboxWorker();
 }
 

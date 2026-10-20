@@ -6,6 +6,8 @@ Main Functions: Enqueue mutation, register handler flush, retry batch kecil, dan
 Side Effects: Menulis IndexedDB `smartpatrol-sql/outbox_mutations`, memasang listener online, dan menghapus item saat flush sukses.
 */
 
+import { isDemoMode } from '../demoMode';
+
 const DB_NAME = 'smartpatrol-sql';
 const DB_VERSION = 1;
 const OUTBOX_STORE = 'outbox_mutations';
@@ -81,7 +83,8 @@ export function registerOutboxHandler(type, handler) {
 
 export async function enqueueOutboxMutation(mutation = {}) {
   const type = String(mutation.type || '').trim();
-  if (!type) return null;
+  // Mode demo: tidak ada antrean mutasi ke server.
+  if (!type || isDemoMode) return null;
 
   const queuedAt = Date.now();
   const payload = {
@@ -179,7 +182,7 @@ export function startSqlOutboxWorker() {
 }
 
 export async function saveCacheSnapshot(key, payload) {
-  if (!key) return;
+  if (!key || isDemoMode) return;
   await runStoreTransaction(CACHE_STORE, 'readwrite', store => store.put({
     key,
     payload,
@@ -188,7 +191,7 @@ export async function saveCacheSnapshot(key, payload) {
 }
 
 export async function loadCacheSnapshot(key) {
-  if (!key) return null;
+  if (!key || isDemoMode) return null;
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(CACHE_STORE, 'readonly');

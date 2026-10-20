@@ -104,6 +104,8 @@ import {
   markTimeAuditRecordReceived,
   normalizeTimeAuditRecord,
 } from '../services/time/timeAudit';
+import { demoAccount, exitDemoMode, isDemoMode } from '../services/demoMode';
+import { createDemoShips, createDemoUsers } from '../data/demoData';
 
 // --- DATA MOCKUP ---
 const ACCESS_ROLES = {
@@ -417,7 +419,8 @@ const initialCheckpoints = defaultLocationOptions.map((name, index) => ({ id: in
 let _mockUsersList = null;
 function getMockUsersList() {
   if (_mockUsersList) return _mockUsersList;
-  _mockUsersList = [];
+  // Mode demo memakai akun dummy di memori; mode normal mulai kosong (data dari Supabase).
+  _mockUsersList = isDemoMode ? createDemoUsers() : [];
   return _mockUsersList;
 }
 
@@ -431,7 +434,7 @@ function buildSeedLookups() {
 let _initialShipsData = null;
 function getInitialShipsData() {
   if (_initialShipsData) return _initialShipsData;
-  _initialShipsData = [];
+  _initialShipsData = isDemoMode ? createDemoShips() : [];
   return _initialShipsData;
 }
 
@@ -3108,8 +3111,9 @@ function logCloudSyncDebug(event, payload) {
   console.info(`[SmartPatrol][cloud-sync] ${event}${serializedPayload}`);
 }
 
-function loadAuthSession() { try { const raw = window.localStorage.getItem(AUTH_SESSION_KEY); if (!raw) return null; const parsed = JSON.parse(raw); return typeof parsed?.userId === 'string' ? parsed.userId : null; } catch { return null; } }
-function saveAuthSession(userId) { try { if (!userId) { window.localStorage.removeItem(AUTH_SESSION_KEY); return; } window.localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({ userId, savedAt: new Date().toISOString() })); } catch (error) { console.error('Gagal menyimpan sesi login', error); } }
+// Mode demo: sesi = akun dummy yang dipilih, tidak pernah dibaca/ditulis ke localStorage.
+function loadAuthSession() { if (isDemoMode) return demoAccount?.userId || null; try { const raw = window.localStorage.getItem(AUTH_SESSION_KEY); if (!raw) return null; const parsed = JSON.parse(raw); return typeof parsed?.userId === 'string' ? parsed.userId : null; } catch { return null; } }
+function saveAuthSession(userId) { if (isDemoMode) return; try { if (!userId) { window.localStorage.removeItem(AUTH_SESSION_KEY); return; } window.localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({ userId, savedAt: new Date().toISOString() })); } catch (error) { console.error('Gagal menyimpan sesi login', error); } }
 function createFallbackEmail(name, index = 0) { const slug = sanitizeText(name, 80).toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/(^[.]+|[.]+$)/g, '') || `user.${index + 1}`; return `${slug}@smartpatrol.local`; }
 function normalizeUserRole(user) {
   const raw = sanitizeText(user?.role || '', 20).toUpperCase();
@@ -3549,6 +3553,8 @@ function sanitizeStateForLocalPersistence(data, options = {}) {
 }
 
 function loadPersistedState() {
+  // Mode demo tidak pernah memuat data asli yang tersimpan di perangkat.
+  if (isDemoMode) return null;
   try {
     const raw = readStorageSnapshot(APP_STORAGE_KEY, LEGACY_APP_STORAGE_KEY);
     if (!raw) return null;
@@ -3568,6 +3574,8 @@ function loadPersistedState() {
   }
 }
 function savePersistedState(data, options = {}) {
+  // Mode demo: data dummy tidak disimpan.
+  if (isDemoMode) return;
   try {
     const persistedData = sanitizeStateForLocalPersistence(data, options);
     window.localStorage.setItem(APP_STORAGE_KEY, JSON.stringify({ version: 1, savedAt: new Date().toISOString(), data: persistedData }));
@@ -9709,6 +9717,11 @@ export function AppProvider({ children }) {
     setAuthForm(createAuthFormState());
   }, [clearOperationalSessionState]);
   const handleLogout = useCallback(async (message = 'Sesi Anda telah berakhir. Silakan login kembali.') => {
+    // Keluar dari akun demo = buang seluruh data dummy dengan memuat ulang ke login normal.
+    if (isDemoMode) {
+      exitDemoMode();
+      return;
+    }
     // Hapus langganan push device ini agar akun lain di device sama tidak menerima
     // notifikasi milik user yang baru saja logout (best-effort; jangan blok logout).
     const pushToken = activePushTokenRef.current;

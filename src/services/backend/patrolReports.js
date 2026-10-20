@@ -6,7 +6,7 @@ Main Functions: Subscribe laporan per shift/kapal dan upsert laporan idempotent 
 Side Effects: Membaca/menulis tabel patrol_reports dan mengantre mutation saat offline.
 */
 
-import { ensureSupabaseClient } from './app';
+import { ensureSupabaseClient, isSupabaseConfigured } from './app';
 import { enqueueOutboxMutation, registerOutboxHandler } from './outbox';
 import { deleteStorageAsset } from './assets';
 
@@ -85,6 +85,8 @@ async function writePatrolReport(report, options = {}) {
 registerOutboxHandler('patrol_report.upsert', writePatrolReport);
 
 export function subscribeToPatrolReports({ shiftKey, shipId, shipName }, callback, onError) {
+  // Tanpa backend (mode demo / build tanpa Supabase): tidak ada langganan realtime.
+  if (!isSupabaseConfigured) return () => {};
   const supabase = ensureSupabaseClient();
   let disposed = false;
 
@@ -266,6 +268,8 @@ export async function deletePatrolReport(criteria = {}) {
 // mereset checkpoint lokal yang cocok (ship_id + checkpoint_id) menjadi pending sehingga
 // temuan hilang dari daftar. Trigger DB sudah mencegah re-upsert menghidupkannya lagi.
 export function subscribeToPatrolReportTombstones(callback, onError) {
+  // Tanpa backend (mode demo / build tanpa Supabase): tidak ada langganan realtime.
+  if (!isSupabaseConfigured) return () => {};
   const supabase = ensureSupabaseClient();
   let disposed = false;
 

@@ -5,7 +5,7 @@ Tujuan: Store dummy (in-memory, tanpa database) untuk alur tindak lanjut temuan:
         acuan baru titik) atau NEED VERIFICATION (minta petugas security memverifikasi, atau PIC
         Security memverifikasi sendiri). Verifikasi sesuai → temuan Closed.
 Caller: Komponen di folder incidentFollowUp, IncidentDetailView, PatrolPage.
-Dependensi: React useSyncExternalStore, followUpPdf (nama file dokumen), shipCheckpoints (kunci nama).
+Dependensi: React useSyncExternalStore, shipCheckpoints (kunci nama).
 Main Functions: useIncidentFollowUps, useIncidentVerification, getIncidentVerificationState,
                 assignFollowUp, submitFollowUpUpdate, submitSecurityReview, returnFollowUpToPic,
                 requestIncidentVerification, submitIncidentVerification, requestReverification, unsolveIncident,
@@ -15,7 +15,6 @@ Side Effects: Hanya state modul di memori; hilang saat aplikasi di-restart (seng
 */
 
 import { useSyncExternalStore } from 'react';
-import { buildFollowUpPdfFileName } from './followUpPdf.js';
 import { createCheckpointNameKey } from '../../utils/shipCheckpoints.js';
 import { isDemoMode } from '../../services/demoMode.js';
 import { DEMO_SHIP_ID, DEMO_UNSOLVE_CHECKPOINT, DEMO_UNSOLVE_CHECKPOINT_NAME } from './demoUnsolveCheckpoint.js';
@@ -220,14 +219,13 @@ function getStoredIncidentState(key) {
   );
 }
 
-export function assignFollowUp(incidentId, { assigneeId, instruction, photoUrl, document, actorName }) {
+export function assignFollowUp(incidentId, { assigneeId, instruction, photoUrl, actorName }) {
   const at = new Date().toISOString();
   const followUp = {
     id: createId('fu'),
     assigneeId,
     instruction,
     photoUrl: photoUrl || null,
-    document: document || null,
     status: FOLLOW_UP_STATUS.NEED_ACTION,
     createdAt: at,
     createdBy: actorName,
@@ -412,11 +410,10 @@ export function seedDemoFollowUps(incident, { securityName }) {
         entry('assign', 30, { actorName: securityName, actorRole: 'PIC Security', comment: 'Pasang rambu peringatan sementara di area temuan.' }),
       ],
     },
-  ].map((item, index) => ({
+  ].map((item) => ({
     ...item,
     id: createId('fu'),
     photoUrl: null,
-    document: { fileName: buildFollowUpPdfFileName(incident, index + 1), generatedAt: item.createdAt },
     createdBy: securityName,
   }));
 

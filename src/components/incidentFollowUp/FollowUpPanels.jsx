@@ -11,10 +11,11 @@ Side Effects: Mengubah store dummy di memori dan membuka PDF; tidak menyentuh da
 */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Ban, Bell, Camera, CheckCircle2, ChevronDown, ClipboardList, Eye, FileText, ImageIcon, RotateCcw, Send, ShieldAlert, ShieldCheck, UserCheck, X, XCircle } from 'lucide-react';
+import { Ban, Bell, Camera, CheckCircle2, ChevronDown, ClipboardList, FileText, ImageIcon, RotateCcw, Send, ShieldAlert, ShieldCheck, UserCheck, X, XCircle } from 'lucide-react';
 import AsyncImage from '../AsyncImage';
 import {
   FOLLOW_UP_STATUS,
+  FOLLOW_UP_STATUS_META,
   INCIDENT_VERIFICATION_STATE,
   PIC_FUNCTION_OPTIONS,
   REPORTER_ROLE_ID,
@@ -37,7 +38,7 @@ import {
   submitSecurityReview,
   unsolveIncident,
 } from './followUpStore';
-import { buildFollowUpPdfFileName, openFollowUpPdf } from './followUpPdf';
+import { openIncidentFollowUpPdf } from './followUpPdf';
 
 const LABEL_CLASS = 'text-[10px] font-mono text-cyan-500 block uppercase tracking-widest font-bold mb-2 ml-1';
 const TEXTAREA_CLASS = 'w-full bg-[#070b19]/60 border border-cyan-800/40 rounded-2xl p-4 text-sm text-cyan-50 focus:border-emerald-500/50 outline-none resize-none';
@@ -144,32 +145,6 @@ function FollowUpModal({ title, subtitle, onClose, onSubmit, submitLabel, canSub
   );
 }
 
-function DocumentCard({ fileName, onOpen, note }) {
-  const [isBusy, setIsBusy] = useState(false);
-  const handleOpen = async () => {
-    if (isBusy) return;
-    setIsBusy(true);
-    try {
-      await onOpen();
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  return (
-    <button type="button" onClick={handleOpen} className="w-full flex items-center gap-3 p-3 rounded-xl border border-rose-500/30 bg-rose-500/5 text-left hover:bg-rose-500/10 transition-all">
-      <div className="w-10 h-10 rounded-lg bg-rose-500/15 border border-rose-500/40 flex items-center justify-center shrink-0">
-        <FileText className="w-5 h-5 text-rose-300" />
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-xs font-bold text-cyan-50 truncate">{fileName}</p>
-        <p className="text-[10px] text-cyan-600">{isBusy ? 'Menyiapkan PDF…' : note}</p>
-      </div>
-      <Eye className="w-4 h-4 text-rose-300 shrink-0" />
-    </button>
-  );
-}
-
 // Warna badge per tone status POV: 'action' (giliran role ini) terang, 'waiting' redup.
 const STATUS_TONE_CLASS = {
   action: 'bg-emerald-500/15 border-emerald-400/70 text-emerald-200',
@@ -248,7 +223,6 @@ function AssignFollowUpModal({ incident, securityName, nextSequence, onClose, on
   const [assigneeId, setAssigneeId] = useState('');
   const [instruction, setInstruction] = useState('');
   const [photoUrl, setPhotoUrl] = useState(null);
-  const fileName = buildFollowUpPdfFileName(incident, nextSequence);
   const assignee = assigneeId ? getAssigneeMeta(assigneeId, securityName) : null;
   const canSubmit = Boolean(assigneeId && instruction.trim());
 
@@ -264,7 +238,6 @@ function AssignFollowUpModal({ incident, securityName, nextSequence, onClose, on
       assigneeId,
       instruction: instruction.trim(),
       photoUrl,
-      document: { fileName, generatedAt: new Date().toISOString() },
       actorName: securityName,
     });
     onAssigned(assignee, { postponedVerification });
@@ -295,23 +268,6 @@ function AssignFollowUpModal({ incident, securityName, nextSequence, onClose, on
       </div>
 
       <PhotoField label="Foto" value={photoUrl} onChange={setPhotoUrl} />
-
-      <div>
-        <label className={LABEL_CLASS}>Dokumen <span className="text-cyan-700 normal-case">(dibuat otomatis)</span></label>
-        <DocumentCard
-          fileName={fileName}
-          note="Ringkasan 5W1H + instruksi · ketuk untuk pratinjau"
-          onOpen={() => openFollowUpPdf({
-            incident,
-            instruction: instruction.trim() || '(instruksi belum diisi)',
-            assigneeLabel: assignee?.label || '(PIC belum dipilih)',
-            securityName,
-            photoUrl,
-            sequence: nextSequence,
-            fileName,
-          })}
-        />
-      </div>
     </FollowUpModal>
   );
 }
@@ -698,30 +654,10 @@ function FollowUpSection({ incident, followUp, sequence, simRole, securityName, 
             <p className="text-sm text-cyan-50 whitespace-pre-wrap leading-relaxed">{followUp.instruction}</p>
           </div>
 
-          {(followUp.photoUrl || followUp.document) && (
-            <div className="space-y-2">
-              {followUp.photoUrl && (
-                <button type="button" onClick={() => onPreviewPhoto({ url: followUp.photoUrl, author: followUp.createdBy, time: `${createdStamp.date} ${createdStamp.time}` })} className="block w-24 h-24 rounded-lg overflow-hidden border border-cyan-800 hover:opacity-80 transition-all">
-                  <AsyncImage src={followUp.photoUrl} className="w-full h-full object-cover" alt="Foto instruksi" />
-                </button>
-              )}
-              {followUp.document && (
-                <DocumentCard
-                  fileName={followUp.document.fileName}
-                  note="Dokumen temuan · dibuat otomatis"
-                  onOpen={() => openFollowUpPdf({
-                    incident,
-                    instruction: followUp.instruction,
-                    assigneeLabel: assignee.label,
-                    securityName: followUp.createdBy,
-                    photoUrl: followUp.photoUrl,
-                    generatedAt: followUp.document.generatedAt,
-                    sequence,
-                    fileName: followUp.document.fileName,
-                  })}
-                />
-              )}
-            </div>
+          {followUp.photoUrl && (
+            <button type="button" onClick={() => onPreviewPhoto({ url: followUp.photoUrl, author: followUp.createdBy, time: `${createdStamp.date} ${createdStamp.time}` })} className="block w-24 h-24 rounded-lg overflow-hidden border border-cyan-800 hover:opacity-80 transition-all">
+              <AsyncImage src={followUp.photoUrl} className="w-full h-full object-cover" alt="Foto instruksi" />
+            </button>
           )}
 
           {activityEntries.length > 0 && (
@@ -848,6 +784,43 @@ function FollowUpHistoryLog({ logs, onPreviewPhoto }) {
         </div>
       )}
     </div>
+  );
+}
+
+// Satu PDF per temuan (5W1H + semua instruksi tindak lanjut), menggantikan dokumen per tindak lanjut.
+function FollowUpPdfButton({ incident, followUps, securityName }) {
+  const [isBusy, setIsBusy] = useState(false);
+  const handleOpen = async () => {
+    if (isBusy) return;
+    setIsBusy(true);
+    try {
+      await openIncidentFollowUpPdf({
+        incident,
+        securityName,
+        items: followUps.map((followUp, index) => ({
+          sequence: index + 1,
+          assigneeLabel: getAssigneeMeta(followUp.assigneeId, securityName).label,
+          instruction: followUp.instruction,
+          statusLabel: FOLLOW_UP_STATUS_META[followUp.status]?.label || '',
+          photoUrl: followUp.photoUrl,
+        })),
+      });
+    } finally {
+      setIsBusy(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={handleOpen}
+      disabled={isBusy}
+      className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-rose-500/40 bg-rose-500/5 text-rose-300 hover:bg-rose-500/15 transition-colors disabled:opacity-50"
+      aria-label="Buka PDF tindak lanjut temuan"
+      title="PDF ringkasan 5W1H + semua instruksi tindak lanjut"
+    >
+      <FileText className="w-3.5 h-3.5" />
+      <span className="text-[10px] font-black uppercase tracking-wider">{isBusy ? '…' : 'PDF'}</span>
+    </button>
   );
 }
 
@@ -1008,17 +981,22 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
         </div>
       )}
       <div className={`rounded-xl border bg-[#0b1229]/60 shadow-sm ${myActionCount > 0 ? 'border-emerald-500/40' : 'border-cyan-900/50'}`}>
-        <button type="button" onClick={() => setIsListExpanded((value) => !value)} className="w-full p-3.5 flex items-center gap-3 text-left" aria-expanded={isListExpanded} aria-label="Daftar tindak lanjut">
-          <ClipboardList className="w-4 h-4 text-cyan-400 shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-bold text-cyan-400 uppercase tracking-widest">Tindak Lanjut ({followUps.length})</p>
-            <div className="mt-1 flex items-center gap-2 flex-wrap">
-              <StatusBadge view={incidentStatusView} />
-              {myActionCount > 0 && <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-wider">Your action: {myActionCount}</span>}
+        <div className="p-3.5 flex items-start gap-3">
+          <button type="button" onClick={() => setIsListExpanded((value) => !value)} className="flex-1 min-w-0 flex items-start gap-3 text-left" aria-expanded={isListExpanded} aria-label="Daftar tindak lanjut">
+            <ClipboardList className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-cyan-400 uppercase tracking-widest">Tindak Lanjut ({followUps.length})</p>
+              <div className="mt-1 flex items-center gap-2 flex-wrap">
+                <StatusBadge view={incidentStatusView} />
+                {myActionCount > 0 && <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-wider">Your action: {myActionCount}</span>}
+              </div>
             </div>
-          </div>
-          <ChevronDown className={`w-4 h-4 text-cyan-600 shrink-0 transition-transform ${isListExpanded ? 'rotate-180' : ''}`} />
-        </button>
+          </button>
+          {followUps.length > 0 && <FollowUpPdfButton incident={incident} followUps={followUps} securityName={securityName} />}
+          <button type="button" onClick={() => setIsListExpanded((value) => !value)} tabIndex={-1} aria-hidden="true" className="shrink-0 p-0.5 text-cyan-600">
+            <ChevronDown className={`w-4 h-4 transition-transform ${isListExpanded ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
 
         {isListExpanded && (
           <div className="px-3 pb-3 space-y-3 animate-in fade-in">

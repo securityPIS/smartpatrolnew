@@ -103,8 +103,12 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
   Main ber-sub: jumlah selesai main+sub (x/y) di samping nama, panah buka/tutup sub di paling kanan bar
   (stopPropagation, tidak memicu tap). CheckpointGroupToggle kini hanya dipakai ShipCheckpointsTab.
 - Laporan AMAN punya catatan opsional (field `kejadian`, maks 280) → tampil "Catatan" di ReportDetailView.
-- Riwayat Update hanya berisi update petugas ("+ Update" hanya role Petugas); log tindak lanjut
-  (`buildFollowUpLogItems`) tampil di section Tindak Lanjut sebagai "Riwayat Tindak Lanjut".
+- Riwayat Update hanya berisi update petugas. Tombol "+ Update" SELALU tampil; aktif hanya untuk role
+  Petugas & temuan belum ditutup (selain itu disabled + alasan). Log tindak lanjut (`buildFollowUpLogItems`)
+  tampil di section Tindak Lanjut sebagai "Riwayat Tindak Lanjut".
+- Detail temuan: urutan tab Info (5W1H) · Update · Dokumentasi.
+- PDF tindak lanjut: SATU per temuan (`openIncidentFollowUpPdf`: 5W1H + semua instruksi), tombol kecil
+  "PDF" di kanan header "Tindak Lanjut (n)". Tidak ada lagi dokumen per tindak lanjut / di form assign.
 - Titik contoh "Pagar Dek Kiri (Contoh)" berstatus UNSOLVE selalu tampil paling atas di daftar checkpoint
   (`demoUnsolveCheckpoint.js`, data dummy): klik → sheet info unsolve (temuan awal, catatan PIC Security,
   foto kondisi saat unsolve) + AMAN/TEMUAN; pilihan hanya toast, tidak membuat laporan.

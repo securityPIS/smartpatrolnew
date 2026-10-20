@@ -1,8 +1,8 @@
 /*
-Tujuan: Membuat dokumen PDF ringkasan temuan (5W1H + instruksi tindak lanjut) secara otomatis.
-Caller: FollowUpPanels (form assign & kartu dokumen di section tindak lanjut).
+Tujuan: Membuat SATU dokumen PDF per temuan: ringkasan 5W1H + daftar semua instruksi tindak lanjut.
+Caller: FollowUpPanels (tombol PDF kecil di header section Tindak Lanjut).
 Dependensi: jspdf (di-import dinamis agar tidak membebani bundle awal).
-Main Functions: buildFollowUpPdfFileName, openFollowUpPdf.
+Main Functions: buildIncidentFollowUpPdfFileName, createIncidentFollowUpPdf, openIncidentFollowUpPdf.
 Side Effects: Membuka PDF di tab/viewer baru, atau mengunduhnya bila pop-up diblokir.
 */
 
@@ -14,8 +14,8 @@ function sanitizeFileToken(value) {
     .slice(0, 40) || 'temuan';
 }
 
-export function buildFollowUpPdfFileName(incident, sequence = 1) {
-  return `Temuan-${sanitizeFileToken(incident?.location)}-TL${sequence}.pdf`;
+export function buildIncidentFollowUpPdfFileName(incident) {
+  return `Temuan-${sanitizeFileToken(incident?.location)}-TindakLanjut.pdf`;
 }
 
 async function loadImageAsDataUrl(url) {
@@ -54,7 +54,8 @@ function getImageSize(dataUrl) {
   });
 }
 
-export async function createFollowUpPdf({ incident, instruction, assigneeLabel, securityName, photoUrl, generatedAt, sequence }) {
+// items: [{ sequence, assigneeLabel, instruction, statusLabel, photoUrl }] — semua tindak lanjut temuan.
+export async function createIncidentFollowUpPdf({ incident, items = [], securityName, generatedAt }) {
   const { jsPDF } = await import('jspdf');
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -82,6 +83,18 @@ export async function createFollowUpPdf({ incident, instruction, assigneeLabel, 
     doc.setTextColor(20, 24, 36);
     doc.text(lines, margin, cursorY);
     cursorY += lines.length * 5 + 4;
+  };
+
+  const writeHeading = (title) => {
+    ensureSpace(12);
+    doc.setDrawColor(200, 205, 215);
+    doc.line(margin, cursorY - 1, pageWidth - margin, cursorY - 1);
+    cursorY += 5;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(11, 18, 41);
+    doc.text(title, margin, cursorY);
+    cursorY += 7;
   };
 
   const writeImage = async (title, url) => {
@@ -113,16 +126,8 @@ export async function createFollowUpPdf({ incident, instruction, assigneeLabel, 
   doc.text('SMARTPATROL — TINDAK LANJUT TEMUAN', margin, 13);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.text(`Dokumen #${sequence || 1} · dibuat otomatis ${new Date(generatedAt || Date.now()).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}`, margin, 21);
+  doc.text(`${items.length} tindak lanjut · dibuat otomatis ${new Date(generatedAt || Date.now()).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}`, margin, 21);
   cursorY = 38;
-
-  writeField('Ditugaskan kepada', assigneeLabel);
-  writeField('Ditugaskan oleh', `PIC Security (${securityName || '-'})`);
-  writeField('Instruksi', instruction);
-
-  doc.setDrawColor(200, 205, 215);
-  doc.line(margin, cursorY - 1, pageWidth - margin, cursorY - 1);
-  cursorY += 5;
 
   writeField('What — Deskripsi', incident?.deskripsi);
   writeField('Where — Lokasi & Kapal', `${incident?.location || '-'} · ${incident?.shipName || '-'}`);
@@ -130,16 +135,23 @@ export async function createFollowUpPdf({ incident, instruction, assigneeLabel, 
   writeField('Why — Penyebab', incident?.penyebab);
   writeField('Who — Pelapor', incident?.reportedBy);
   writeField('How — Tindak Lanjut Awal', incident?.tindakLanjut);
-
   await writeImage('Foto temuan', incident?.photoUrl);
-  await writeImage('Foto lampiran instruksi', photoUrl);
+
+  for (const item of items) {
+    writeHeading(`Tindak Lanjut #${item.sequence}`);
+    writeField('Ditugaskan kepada', item.assigneeLabel);
+    writeField('Ditugaskan oleh', `PIC Security (${securityName || '-'})`);
+    if (item.statusLabel) writeField('Status', item.statusLabel);
+    writeField('Instruksi', item.instruction);
+    await writeImage('Foto lampiran instruksi', item.photoUrl);
+  }
 
   return doc;
 }
 
-export async function openFollowUpPdf(options) {
-  const doc = await createFollowUpPdf(options);
-  const fileName = options.fileName || buildFollowUpPdfFileName(options.incident, options.sequence);
+export async function openIncidentFollowUpPdf(options) {
+  const doc = await createIncidentFollowUpPdf(options);
+  const fileName = buildIncidentFollowUpPdfFileName(options.incident);
   const blobUrl = doc.output('bloburl');
   const openedWindow = window.open(blobUrl, '_blank');
   if (!openedWindow) doc.save(fileName);

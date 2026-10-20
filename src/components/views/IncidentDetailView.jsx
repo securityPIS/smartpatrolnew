@@ -280,6 +280,10 @@ export default function IncidentDetailView({ isInline = false }) {
   // Tambah update riwayat temuan hanya untuk Petugas (role simulasi); SOS tetap ikut izin asli.
   const canAddHistoryUpdate = canManageDetailActions
     && (!showFollowUpFeature || followUpSimRole === REPORTER_ROLE_ID);
+  let historyUpdateDisabledReason = '';
+  if (incidentStatus === 'closed') historyUpdateDisabledReason = isFollowUpUnsolved ? 'Temuan sudah Unsolve — riwayat update ditutup.' : 'Temuan sudah ditutup — riwayat update ditutup.';
+  else if (showFollowUpFeature && followUpSimRole !== REPORTER_ROLE_ID) historyUpdateDisabledReason = 'Riwayat update hanya diisi oleh petugas security.';
+  else if (!canManageDetailActions) historyUpdateDisabledReason = 'Akun ini tidak dapat menambah update untuk temuan ini.';
   const historyItems = sortIncidentHistoryItems(progressItems);
 
   const saveIncidentInfo = () => {
@@ -404,9 +408,10 @@ export default function IncidentDetailView({ isInline = false }) {
       </div>
 
       <div className="flex bg-[#0b1229] border-b border-cyan-900/50 shrink-0">
+        {/* Urutan tab: Info (5W1H) · Update · Dokumentasi */}
+        <button onClick={() => setActiveTab('info')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-all border-b-2 ${activeTab === 'info' ? (isSOSIncident ? 'text-rose-300 border-rose-500 bg-rose-500/5' : 'text-yellow-400 border-yellow-500 bg-yellow-500/5') : 'text-cyan-600 border-transparent hover:text-cyan-400'}`}>Info (5W1H)</button>
         <button onClick={() => setActiveTab('update')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-all border-b-2 ${activeTab === 'update' ? 'text-emerald-400 border-emerald-500 bg-emerald-500/5' : 'text-cyan-600 border-transparent hover:text-cyan-400'}`}>Update</button>
         <button onClick={() => setActiveTab('documentation')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-all border-b-2 ${activeTab === 'documentation' ? 'text-fuchsia-400 border-fuchsia-500 bg-fuchsia-500/5' : 'text-cyan-600 border-transparent hover:text-cyan-400'}`}>Dokumentasi</button>
-        <button onClick={() => setActiveTab('info')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-all border-b-2 ${activeTab === 'info' ? (isSOSIncident ? 'text-rose-300 border-rose-500 bg-rose-500/5' : 'text-yellow-400 border-yellow-500 bg-yellow-500/5') : 'text-cyan-600 border-transparent hover:text-cyan-400'}`}>Info (5W1H)</button>
       </div>
 
       {showFollowUpFeature && activeTab !== 'documentation' && (
@@ -617,18 +622,20 @@ export default function IncidentDetailView({ isInline = false }) {
             <div className="pt-2">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <h4 className="text-xs font-bold text-cyan-400 uppercase tracking-widest flex items-center gap-2"><FileText className="w-4 h-4" /> RIWAYAT UPDATE</h4>
-                {incidentStatus !== 'closed' && (
-                  <button
-                    type="button"
-                    onClick={() => setShowUpdateForm(true)}
-                    disabled={!canAddHistoryUpdate}
-                    title={canAddHistoryUpdate ? 'Tambah update' : 'Hanya Petugas yang dapat menambah update'}
-                    className="px-3 py-1.5 bg-emerald-600/10 border border-emerald-500/30 text-emerald-400 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 hover:bg-emerald-600 hover:text-white transition-all active:scale-95 disabled:opacity-40 disabled:hover:bg-emerald-600/10 disabled:hover:text-emerald-400 disabled:cursor-not-allowed"
-                  >
-                    <Plus className="w-3.5 h-3.5" /> Update
-                  </button>
-                )}
+                {/* Tombol selalu tampil; hanya aktif untuk petugas security (dan temuan belum ditutup). */}
+                <button
+                  type="button"
+                  onClick={() => setShowUpdateForm(true)}
+                  disabled={!canAddHistoryUpdate}
+                  title={canAddHistoryUpdate ? 'Tambah update' : historyUpdateDisabledReason}
+                  className="shrink-0 px-3 py-1.5 bg-emerald-600/10 border border-emerald-500/30 text-emerald-400 rounded-lg flex items-center gap-1.5 hover:bg-emerald-600 hover:text-white transition-all active:scale-95 disabled:opacity-50 disabled:hover:bg-emerald-600/10 disabled:hover:text-emerald-400 disabled:cursor-not-allowed"
+                >
+                  <Plus className="w-3.5 h-3.5" /> <span className="text-[10px] font-black uppercase tracking-widest">Update</span>
+                </button>
               </div>
+              {!canAddHistoryUpdate && (
+                <p className="-mt-2 mb-4 text-[10px] text-cyan-600 italic">{historyUpdateDisabledReason}</p>
+              )}
               <div className="space-y-5 border-l-2 border-cyan-800 ml-2 pl-5">
                 {historyItems.map((prog, idx) => (
                   <div key={prog.id || idx} className="relative">

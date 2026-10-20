@@ -58,6 +58,8 @@ export default function PatrolFormView({ isInline = false }) {
   // Harus dideklarasikan sebelum conditional return agar tidak melanggar Rules of Hooks
   const [touched, setTouched] = React.useState({ kejadian: false, penyebab: false, tindakLanjut: false });
   const touch = (field) => setTouched(prev => ({ ...prev, [field]: true }));
+  // Form bisa dirender dua kali (modal mobile + panel desktop) → id unik per instance.
+  const amanNoteId = React.useId();
 
   if (!activePatrolItem || !activePatrolState) {
     if (isInline) return (
@@ -198,17 +200,34 @@ export default function PatrolFormView({ isInline = false }) {
             </div>
           </>
         ) : (
-          !activePatrolState.photoUrl ? (
-            <button onClick={() => handlePhotoUpload(activePatrolId, false, { cameraOnly: shouldForcePatrolCameraCapture })} className="w-full py-8 rounded-xl border-2 border-dashed flex flex-col items-center gap-2 transition-colors border-emerald-500/40 bg-emerald-950/20 text-emerald-400 hover:bg-emerald-900/40">
-              <Camera className="w-8 h-8" />
-              <span className="text-sm font-bold uppercase tracking-wider">{shouldForcePatrolCameraCapture ? 'Ambil Foto Aman' : 'Unggah Visual Aman'}</span>
-            </button>
-          ) : (
-            <div className="w-full aspect-[4/5] bg-[#070b19] rounded-xl border border-cyan-800 overflow-hidden relative">
-              <AsyncImage src={activePatrolState.photoUrl} alt="Preview" className="w-full h-full object-cover" />
-              <button onClick={() => handleFormChange(activePatrolId, 'photoUrl', null)} className="absolute top-2 right-2 bg-black/60 p-1.5 rounded-lg border border-yellow-500/50 text-white hover:bg-rose-500 transition-colors" aria-label="Hapus foto"><X className="w-4 h-4" /></button>
+          <>
+            {!activePatrolState.photoUrl ? (
+              <button onClick={() => handlePhotoUpload(activePatrolId, false, { cameraOnly: shouldForcePatrolCameraCapture })} className="w-full py-8 rounded-xl border-2 border-dashed flex flex-col items-center gap-2 transition-colors border-emerald-500/40 bg-emerald-950/20 text-emerald-400 hover:bg-emerald-900/40">
+                <Camera className="w-8 h-8" />
+                <span className="text-sm font-bold uppercase tracking-wider">{shouldForcePatrolCameraCapture ? 'Ambil Foto Aman' : 'Unggah Visual Aman'}</span>
+              </button>
+            ) : (
+              <div className="w-full aspect-[4/5] bg-[#070b19] rounded-xl border border-cyan-800 overflow-hidden relative">
+                <AsyncImage src={activePatrolState.photoUrl} alt="Preview" className="w-full h-full object-cover" />
+                <button onClick={() => handleFormChange(activePatrolId, 'photoUrl', null)} className="absolute top-2 right-2 bg-black/60 p-1.5 rounded-lg border border-yellow-500/50 text-white hover:bg-rose-500 transition-colors" aria-label="Hapus foto"><X className="w-4 h-4" /></button>
+              </div>
+            )}
+            {/* Catatan AMAN opsional; disimpan di field `kejadian` laporan (maks. 280 karakter). */}
+            <div>
+              <label htmlFor={amanNoteId} className="text-[10px] uppercase tracking-widest text-cyan-500 mb-1.5 block font-bold">
+                Catatan <span className="text-cyan-700 normal-case">(opsional)</span>
+              </label>
+              <textarea
+                id={amanNoteId}
+                placeholder="Contoh: kondisi sesuai foto acuan, tidak ada perubahan."
+                rows={3}
+                maxLength={280}
+                value={activePatrolState.kejadian || ''}
+                onChange={(event) => handleFormChange(activePatrolId, 'kejadian', event.target.value)}
+                className="w-full bg-[#070b19] border border-cyan-800/50 rounded-xl p-3 text-sm text-cyan-50 outline-none resize-none transition-colors focus:border-emerald-500"
+              />
             </div>
-          )
+          </>
         )}
       </div>
 

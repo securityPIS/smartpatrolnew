@@ -58,6 +58,9 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
   tidak dibaca/ditulis localStorage, foto tidak ke IndexedDB (data URL di memori), outbox no-op.
   Dataset: `createDemoUsers/createDemoShips` lewat `getMockUsersList/getInitialShipsData`. Kapal demo WAJIB
   punya `personnel` (rekonsiliasi shipAssigned) agar petugas tidak ter-logout "off-duty".
+- Kapal demo punya titik "Pagar Dek Kiri" yang di-seed Unsolve (override foto acuan di followUpStore saat
+  isDemoMode) → AMAN/TEMUAN membuat laporan sungguhan (data dummy), seperti go live. Kartu contoh
+  "Pagar Dek Kiri (Contoh)" hanya tampil di mode normal. Peringatan "Sinkronisasi nonaktif" dimatikan di demo.
 - Fungsi `subscribeTo*` di services/backend harus return noop bila `!isSupabaseConfigured` (dulu throw →
   crash dashboard admin). Satu-satunya request backend di demo: trusted time `server-time` (baca jam saja).
 
@@ -95,9 +98,13 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
   Closed/Unsolve = OPEN (`isPatrolTemuanOpen`) → pilihan tap jadi TEMUAN BARU / UPDATE TEMUAN (berlaku
   juga untuk tap NFC asli). Update Temuan membuka detail temuan (`patrolUpdateIntentAt`) langsung ke form
   update riwayat sebagai Petugas. Tanpa temuan open → AMAN/TEMUAN, foto acuan pakai override Unsolve.
-- Item checkpoint pending tidak lagi punya badge "Tap NFC"/"Tanpa NFC"; diganti tombol "Simulasi Tap"
-  (buka sheet tanpa verifikasi NFC; checklist terkunci → buka modal status shift; akun yang tak bisa
-  patroli kapal ini melihat alasan, tombol lapor nonaktif). "+ Update" Riwayat Update hanya role Petugas.
+- Item checkpoint pending: SELURUH bar adalah area Simulasi Tap (buka sheet tanpa verifikasi NFC; checklist
+  terkunci → modal status shift; akun yang tak bisa patroli kapal ini melihat alasan, tombol lapor nonaktif).
+  Main ber-sub: jumlah selesai main+sub (x/y) di samping nama, panah buka/tutup sub di paling kanan bar
+  (stopPropagation, tidak memicu tap). CheckpointGroupToggle kini hanya dipakai ShipCheckpointsTab.
+- Laporan AMAN punya catatan opsional (field `kejadian`, maks 280) → tampil "Catatan" di ReportDetailView.
+- Riwayat Update hanya berisi update petugas ("+ Update" hanya role Petugas); log tindak lanjut
+  (`buildFollowUpLogItems`) tampil di section Tindak Lanjut sebagai "Riwayat Tindak Lanjut".
 - Titik contoh "Pagar Dek Kiri (Contoh)" berstatus UNSOLVE selalu tampil paling atas di daftar checkpoint
   (`demoUnsolveCheckpoint.js`, data dummy): klik → sheet info unsolve (temuan awal, catatan PIC Security,
   foto kondisi saat unsolve) + AMAN/TEMUAN; pilihan hanya toast, tidak membuat laporan.

@@ -13,9 +13,10 @@ import { summarizeTimeAudit } from '../services/time/timeAudit';
 import {
   CheckCircle2, AlertTriangle, Search, Ship, MapPin, ExternalLink, ArrowLeft, Plus,
   CalendarDays, Thermometer, Wind, FileText, CircleOff, TimerReset, Clock, Nfc, CornerDownRight, Settings,
-  ImageIcon,
+  ImageIcon, ChevronDown,
 } from 'lucide-react';
-import CheckpointGroupToggle, { useCollapsedGroups } from '../components/CheckpointGroupToggle';
+import { useCollapsedGroups } from '../components/CheckpointGroupToggle';
+import { isDemoMode } from '../services/demoMode';
 import PatrolNfcChoiceSheet from '../components/modals/PatrolNfcChoiceSheet';
 import { FollowUpToast } from '../components/incidentFollowUp/FollowUpPanels';
 import { DEMO_UNSOLVE_CHECKPOINT } from '../components/incidentFollowUp/demoUnsolveCheckpoint';
@@ -316,14 +317,46 @@ const PatrolPage = React.memo(function PatrolPage() {
     return groups;
   }, [getDefinitionForItem, visibleCheckpoints]);
 
-  const renderPatrolListItem = (item, { standalone = false } = {}) => {
+  // Jumlah selesai main + sub (mis. 2/4) di samping nama main, panah buka/tutup sub di paling kanan bar.
+  const renderSubGroupCount = (subGroup) => (
+    subGroup ? (
+      <span className={`shrink-0 text-[11px] font-bold tabular-nums ${subGroup.done === subGroup.total ? 'text-emerald-300' : 'text-cyan-500'}`} title="Titik selesai (main + sub)">
+        {subGroup.done}/{subGroup.total}
+      </span>
+    ) : null
+  );
+  const renderSubGroupToggle = (subGroup, itemName) => (
+    subGroup ? (
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          subGroup.onToggle();
+        }}
+        aria-expanded={subGroup.expanded}
+        aria-controls={subGroup.controlsId}
+        aria-label={`${subGroup.expanded ? 'Tutup' : 'Buka'} ${subGroup.subCount} sub checkpoint ${itemName}`}
+        className="shrink-0 p-2 -mr-1 rounded-lg text-sky-300 hover:bg-sky-500/10 transition-colors"
+      >
+        <ChevronDown className={`w-5 h-5 transition-transform ${subGroup.expanded ? 'rotate-180' : ''}`} />
+      </button>
+    ) : null
+  );
+
+  const renderPatrolListItem = (item, { standalone = false, subGroup = null } = {}) => {
     const definition = getDefinitionForItem(item);
     const referencePhoto = getReferencePhotoForItem(item, definition);
-    if (item.status === 'completed') return renderSummaryListItem(item, { referencePhoto });
+    if (item.status === 'completed') {
+      return renderSummaryListItem(item, {
+        referencePhoto,
+        countNode: renderSubGroupCount(subGroup),
+        toggleNode: renderSubGroupToggle(subGroup, item.name),
+      });
+    }
     const hasOpenTemuan = getTemuanStateForItem(item).openTemuan.length > 0;
     // Label induk hanya untuk sub yang tampil di luar kelompok main-nya.
     const parentName = standalone && definition?.type === 'sub' ? definitionById.get(definition.parentId)?.name : '';
-    // Laporan titik lewat tap NFC asli; tombol Simulasi Tap meniru tap tersebut (tanpa verifikasi NFC).
+    // Bar checkpoint = area simulasi tap NFC (laporan asli tetap lewat tap NFC fisik).
     // Checklist terkunci → arahkan ke isian status shift dulu, bukan diam saja.
     const handleSimulateTap = () => {
       if (isCheckpointLocked) {
@@ -336,7 +369,17 @@ const PatrolPage = React.memo(function PatrolPage() {
     return (
       <div
         key={item.id}
-        className={`p-3 bg-[#0b1229] border rounded-xl transition-all ${definition?.type === 'sub' ? 'border-sky-900/60' : 'border-cyan-800/50'}`}
+        role="button"
+        tabIndex={0}
+        onClick={handleSimulateTap}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            handleSimulateTap();
+          }
+        }}
+        aria-label={`Simulasi tap NFC di ${item.name}`}
+        className={`p-3 bg-[#0b1229] border rounded-xl transition-all cursor-pointer hover:border-fuchsia-500/50 active:scale-[0.99] ${definition?.type === 'sub' ? 'border-sky-900/60' : 'border-cyan-800/50'}`}
       >
         <div className="flex items-center justify-between gap-2">
           <div className="flex-1 min-w-0">
@@ -345,6 +388,7 @@ const PatrolPage = React.memo(function PatrolPage() {
             )}
             <div className="flex items-center gap-2 min-w-0">
               <p className="font-bold text-white truncate">{item.name}</p>
+              {renderSubGroupCount(subGroup)}
               {item.isTemporaryShiftNode && (
                 <span className="shrink-0 text-[9px] uppercase tracking-widest text-yellow-300 border border-yellow-500/40 px-1.5 py-0.5 rounded">
                   Tambahan Shift
@@ -364,15 +408,7 @@ const PatrolPage = React.memo(function PatrolPage() {
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             {renderReferencePhotoButton(item, referencePhoto)}
-            <button
-              type="button"
-              onClick={handleSimulateTap}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-colors ${isCheckpointLocked ? 'border-slate-700 text-slate-400' : 'border-fuchsia-500/40 bg-fuchsia-500/10 text-fuchsia-200 hover:bg-fuchsia-500/20'}`}
-              aria-label={`Simulasi tap NFC di ${item.name}`}
-            >
-              <Nfc className="w-3.5 h-3.5" />
-              <span className="text-[10px] font-bold uppercase tracking-wider">Simulasi Tap</span>
-            </button>
+            {renderSubGroupToggle(subGroup, item.name)}
           </div>
         </div>
       </div>
@@ -399,10 +435,6 @@ const PatrolPage = React.memo(function PatrolPage() {
             <span className="text-[9px] uppercase tracking-widest text-fuchsia-300 border border-fuchsia-500/40 px-1.5 py-0.5 rounded">Contoh</span>
           </div>
         </div>
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-fuchsia-500/40 bg-fuchsia-500/10 text-fuchsia-200 shrink-0">
-          <Nfc className="w-3.5 h-3.5" />
-          <span className="text-[10px] font-bold uppercase tracking-wider">Simulasi Tap</span>
-        </span>
       </button>
     );
   };
@@ -527,6 +559,7 @@ const PatrolPage = React.memo(function PatrolPage() {
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-0.5">
             <p className={`font-bold ${meta.itemTextClass}`}>{item.name}</p>
+            {options.countNode}
             {item.nfcVerification?.tagId && (
               <span className="inline-flex items-center gap-0.5 text-[9px] uppercase tracking-widest text-emerald-300 border border-emerald-500/40 px-1 py-0.5 rounded" title="Dilaporkan lewat tap NFC"><Nfc className="w-3 h-3" /> NFC</span>
             )}
@@ -562,6 +595,7 @@ const PatrolPage = React.memo(function PatrolPage() {
             </div>
           )}
         </div>
+        {options.toggleNode && <div className="ml-1">{options.toggleNode}</div>}
       </div>
     );
   }, [displayShiftTime, handleOpenPatrolResult, renderReferencePhotoButton, setPreviewPhoto]);
@@ -732,7 +766,7 @@ const PatrolPage = React.memo(function PatrolPage() {
                 )}
 
                 <div className="space-y-3 flex-1">
-                  {!isHistoryMode && !searchQuery && renderDemoUnsolveItem()}
+                  {!isHistoryMode && !isDemoMode && !searchQuery && renderDemoUnsolveItem()}
                   {visibleCheckpoints.length === 0 && (
                     <p className="text-xs text-cyan-700 italic border border-dashed border-cyan-900/50 p-4 rounded-xl text-center">
                       {searchQuery ? `Titik patroli "${searchQuery}" tidak ditemukan.` : 'Belum ada titik patroli yang tersedia.'}
@@ -744,17 +778,17 @@ const PatrolPage = React.memo(function PatrolPage() {
                     const expanded = Boolean(searchQuery) || patrolCollapse.isExpanded(mainId);
                     const doneSubs = group.subs.filter(sub => sub.status === 'completed').length;
                     const listId = `patrol-subs-${mainId}`;
+                    const subGroup = {
+                      expanded,
+                      onToggle: () => patrolCollapse.toggle(mainId),
+                      subCount: group.subs.length,
+                      controlsId: listId,
+                      done: doneSubs + (group.item.status === 'completed' ? 1 : 0),
+                      total: group.subs.length + 1,
+                    };
                     return (
                       <div key={group.item.id} className="p-2 rounded-2xl border border-cyan-900/60 bg-[#0b1229]/40 space-y-2">
-                        {renderPatrolListItem(group.item)}
-                        <CheckpointGroupToggle
-                          expanded={expanded}
-                          onToggle={() => patrolCollapse.toggle(mainId)}
-                          subCount={group.subs.length}
-                          controlsId={listId}
-                          summary={`${doneSubs}/${group.subs.length} selesai`}
-                          summaryTone={doneSubs === group.subs.length ? 'good' : 'muted'}
-                        />
+                        {renderPatrolListItem(group.item, { subGroup })}
                         {expanded && (
                           <div id={listId} className="ml-3 pl-3 border-l-2 border-sky-800/60 space-y-2">
                             {group.subs.map(sub => renderPatrolListItem(sub))}

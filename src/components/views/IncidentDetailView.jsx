@@ -11,7 +11,7 @@ import { useIncidents, useReports, useRole, useShips } from '../../context/AppCo
 import { ChevronDown, AlertTriangle, CheckCircle2, Camera, X, Plus, FileText, Trash2, Images, Pencil, Save, MapPin, ExternalLink } from 'lucide-react';
 import AsyncImage from '../AsyncImage';
 import { TimeAuditPills, TimeAuditRecordCard } from '../TimeAuditStatus';
-import { REPORTER_ROLE_ID, SECURITY_ASSIGNEE_ID, buildFollowUpLogItems, formatFollowUpTimestamp, useIncidentClosure, useIncidentFollowUps, useIncidentUnsolve, useIncidentVerification } from '../incidentFollowUp/followUpStore';
+import { REPORTER_ROLE_ID, SECURITY_ASSIGNEE_ID, useIncidentClosure, useIncidentFollowUps, useIncidentUnsolve, useIncidentVerification } from '../incidentFollowUp/followUpStore';
 import { FollowUpAssignCard, FollowUpRoleSwitcher, FollowUpSectionList, FollowUpToast } from '../incidentFollowUp/FollowUpPanels';
 
 function normalizeIncidentMetaKeyPart(value) {
@@ -107,16 +107,13 @@ function getHistoryItemTimestamp(item) {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
-// Gabungkan riwayat progress temuan dengan log tindak lanjut (dummy), terbaru paling atas.
-function mergeIncidentHistoryItems(progressItems = [], followUpLogItems = []) {
-  return [...progressItems, ...followUpLogItems]
+// Riwayat Update hanya berisi update petugas security, terbaru paling atas. Log tindak lanjut
+// ditampilkan di section Tindak Lanjut sendiri (FollowUpSectionList).
+function sortIncidentHistoryItems(progressItems = []) {
+  return progressItems
     .map((item, index) => ({ item, index }))
     .sort((left, right) => (getHistoryItemTimestamp(right.item) - getHistoryItemTimestamp(left.item)) || (right.index - left.index))
-    .map(({ item }) => {
-      if (!item.isFollowUpLog) return item;
-      const stamp = formatFollowUpTimestamp(item.createdAt);
-      return { ...item, date: stamp.date, time: stamp.time };
-    });
+    .map(({ item }) => item);
 }
 
 function normalizeMapCoordinate(value, digits = 6) {
@@ -283,10 +280,7 @@ export default function IncidentDetailView({ isInline = false }) {
   // Tambah update riwayat temuan hanya untuk Petugas (role simulasi); SOS tetap ikut izin asli.
   const canAddHistoryUpdate = canManageDetailActions
     && (!showFollowUpFeature || followUpSimRole === REPORTER_ROLE_ID);
-  const historyItems = mergeIncidentHistoryItems(
-    progressItems,
-    showFollowUpFeature ? buildFollowUpLogItems(followUps, followUpSecurityName, followUpClosure, followUpVerification, followUpUnsolve) : [],
-  );
+  const historyItems = sortIncidentHistoryItems(progressItems);
 
   const saveIncidentInfo = () => {
     const didUpdate = handleUpdateIncidentInfo(selectedIncident.id, incidentInfoForm);
@@ -638,13 +632,10 @@ export default function IncidentDetailView({ isInline = false }) {
               <div className="space-y-5 border-l-2 border-cyan-800 ml-2 pl-5">
                 {historyItems.map((prog, idx) => (
                   <div key={prog.id || idx} className="relative">
-                    <div className={`absolute -left-[25px] top-0 w-3 h-3 rounded-full border-2 border-[#070b19] ${prog.isFollowUpLog ? 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.8)]' : 'bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)]'}`}></div>
+                    <div className="absolute -left-[25px] top-0 w-3 h-3 rounded-full border-2 border-[#070b19] bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)]"></div>
                     <p className="text-[10px] font-mono text-cyan-500 mb-1.5">{prog.date} {prog.time} {' · '} <span className="text-emerald-400 font-bold">{prog.author}</span></p>
                     <div className="flex gap-3 items-start bg-[#0b1229] p-3.5 rounded-xl border border-cyan-900/50 shadow-sm hover:border-cyan-700 transition-colors">
                       <div className="flex-1 min-w-0">
-                        {prog.isFollowUpLog && (
-                          <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-1">{prog.tag} {' · '} <span className="normal-case tracking-normal font-semibold text-cyan-300">{prog.headline}</span></p>
-                        )}
                         {prog.comment && <p className="text-sm text-cyan-50 whitespace-pre-wrap leading-relaxed">{prog.comment}</p>}
                       </div>
                       {prog.photoUrl && <div className="w-20 h-20 rounded-lg overflow-hidden border border-cyan-800 flex-shrink-0 cursor-pointer hover:opacity-80 transition-all relative group" onClick={() => setPreviewPhoto({ url: prog.photoUrl, author: prog.author, time: `${prog.date} ${prog.time}` })}><AsyncImage src={prog.thumbUrl} fallbackSrc={prog.photoUrl} className="w-full h-full object-cover" alt="Progress" /></div>}

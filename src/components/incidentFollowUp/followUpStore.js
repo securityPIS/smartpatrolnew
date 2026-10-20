@@ -17,6 +17,8 @@ Side Effects: Hanya state modul di memori; hilang saat aplikasi di-restart (seng
 import { useSyncExternalStore } from 'react';
 import { buildFollowUpPdfFileName } from './followUpPdf.js';
 import { createCheckpointNameKey } from '../../utils/shipCheckpoints.js';
+import { isDemoMode } from '../../services/demoMode.js';
+import { DEMO_SHIP_ID, DEMO_UNSOLVE_CHECKPOINT, DEMO_UNSOLVE_CHECKPOINT_NAME } from './demoUnsolveCheckpoint.js';
 
 export const FOLLOW_UP_STATUS = {
   NEED_ACTION: 'need_action',
@@ -65,6 +67,15 @@ const unsolvesByIncident = new Map();
 const referenceOverridesByCheckpoint = new Map();
 const listeners = new Set();
 const EMPTY_LIST = Object.freeze([]);
+
+// Akun demo: satu titik kapal demo sudah berstatus Unsolve agar alur AMAN/TEMUAN bisa dicoba seperti
+// versi go live (laporan patroli sungguhan di data dummy).
+if (isDemoMode) {
+  referenceOverridesByCheckpoint.set(
+    createCheckpointTemuanKey(DEMO_SHIP_ID, DEMO_UNSOLVE_CHECKPOINT_NAME),
+    { ...DEMO_UNSOLVE_CHECKPOINT.override, incidentId: 'demo-unsolve-incident' },
+  );
+}
 
 let storeVersion = 0;
 

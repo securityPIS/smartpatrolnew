@@ -231,6 +231,12 @@ export default function ReportDetailView({ isInline = false }) {
                  </div>
                </div>
              </div>
+             {selectedReportDetail.kejadian && (
+               <div className="bg-emerald-950/20 p-4 rounded-xl border border-emerald-900/30">
+                 <p className="text-[10px] text-emerald-600 font-bold mb-1.5 flex items-center gap-1.5 uppercase tracking-widest"><CheckCircle2 className="w-3 h-3" /> Catatan</p>
+                 <p className="text-sm text-emerald-50/90 leading-relaxed whitespace-pre-wrap">{selectedReportDetail.kejadian}</p>
+               </div>
+             )}
              <div className="bg-[#0b1229] p-4 rounded-xl border border-cyan-900/50 shadow-sm">
                {hasGpsSnapshot ? (
                  <>

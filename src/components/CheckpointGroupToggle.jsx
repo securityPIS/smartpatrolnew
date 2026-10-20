@@ -1,6 +1,7 @@
 /*
 Tujuan: Tombol buka/tutup daftar sub checkpoint di bawah main checkpoint.
-Caller: ShipCheckpointsTab (admin, menu Armada) dan PatrolPage (petugas).
+Caller: ShipCheckpointsTab (admin, menu Armada). PatrolPage hanya memakai useCollapsedGroups
+        (panah sub ada di bar main checkpoint).
 */
 
 import React from 'react';

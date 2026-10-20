@@ -6,8 +6,10 @@ Side Effects: Tidak ada; data hanya hidup di memori selama halaman terbuka.
 */
 
 import { createPosterDataUrl } from './defaultData';
+import { DEMO_SHIP_ID, DEMO_UNSOLVE_CHECKPOINT_NAME } from '../components/incidentFollowUp/demoUnsolveCheckpoint';
 
 export const DEMO_SHIP_NAME = 'KM Demo Nusantara';
+// Titik DEMO_UNSOLVE_CHECKPOINT_NAME sudah berstatus Unsolve (override foto acuan di-seed followUpStore).
 
 export function createDemoUsers() {
   return [
@@ -38,7 +40,7 @@ export function createDemoShips() {
   const photo = (title, index) => createPosterDataUrl(title, 'Foto kondisi awal (demo)', index);
   return [
     {
-      id: 'demo-ship-1',
+      id: DEMO_SHIP_ID,
       name: DEMO_SHIP_NAME,
       type: 'Oil Tanker',
       imoNumber: '9000001',
@@ -55,6 +57,7 @@ export function createDemoShips() {
         { id: 'cpdef-haluan', name: 'Haluan', type: 'main', isDefault: true, nfcTagId: 'DEMO-NFC-01', referencePhotoUrl: photo('Haluan', 0) },
         { id: 'cpdef-anjungan', name: 'Anjungan', type: 'main', isDefault: true, nfcTagId: 'DEMO-NFC-02', referencePhotoUrl: photo('Anjungan', 1) },
         { id: 'cpdef-ruang-mesin', name: 'Ruang Mesin', type: 'main', isDefault: true, nfcTagId: 'DEMO-NFC-03', referencePhotoUrl: photo('Ruang Mesin', 3) },
+        { id: 'demo-pagar-dek-kiri', name: DEMO_UNSOLVE_CHECKPOINT_NAME, type: 'main', desc: 'Pagar pengaman dek sisi kiri', nfcTagId: 'DEMO-NFC-05', referencePhotoUrl: photo('Pagar Dek Kiri', 5) },
         { id: 'demo-panel-listrik', name: 'Panel Listrik Mesin', type: 'sub', parentId: 'cpdef-ruang-mesin', desc: 'Sub titik di Ruang Mesin', nfcTagId: 'DEMO-NFC-04', referencePhotoUrl: photo('Panel Listrik', 4) },
       ],
     },

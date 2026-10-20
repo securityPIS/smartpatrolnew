@@ -6126,6 +6126,8 @@ export function AppProvider({ children }) {
   // untuk re-sync latar belakang.
   const notifyPatrolSyncIssue = useCallback((status) => {
     if (!status || status.syncStatus === 'ok' || status.syncStatus === 'invalid') return;
+    // Mode demo memang tanpa server: laporan cukup di memori, tidak perlu peringatan sinkronisasi.
+    if (isDemoMode) return;
 
     if (status.syncStatus === 'sync-disabled') {
       setConfirmDialog({

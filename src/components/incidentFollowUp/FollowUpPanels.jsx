@@ -20,6 +20,7 @@ import {
   REPORTER_ROLE_ID,
   SECURITY_ASSIGNEE_ID,
   assignFollowUp,
+  buildFollowUpLogItems,
   formatFollowUpTimestamp,
   getAssigneeMeta,
   getFollowUpStatusView,
@@ -815,6 +816,41 @@ function VerificationPostponedNotice({ notice, simRole, verifierTargetLabel }) {
   );
 }
 
+// Riwayat tindak lanjut (assign, update, feedback, verifikasi, unsolve) di section Tindak Lanjut —
+// terpisah dari Riwayat Update yang khusus berisi update petugas security.
+function FollowUpHistoryLog({ logs, onPreviewPhoto }) {
+  const [isOpen, setIsOpen] = useState(false);
+  if (!logs.length) return null;
+  return (
+    <div className="rounded-xl border border-cyan-900/50 bg-[#070b19]/40">
+      <button type="button" onClick={() => setIsOpen((value) => !value)} className="w-full px-3.5 py-3 flex items-center gap-2 text-left" aria-expanded={isOpen}>
+        <FileText className="w-4 h-4 text-cyan-500 shrink-0" />
+        <span className="flex-1 text-[10px] font-bold uppercase tracking-widest text-cyan-400">Riwayat Tindak Lanjut ({logs.length})</span>
+        <ChevronDown className={`w-4 h-4 text-cyan-600 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+      {isOpen && (
+        <div className="px-3.5 pb-3.5 space-y-3 border-l-2 border-emerald-900/60 ml-5 pl-4 animate-in fade-in">
+          {logs.map((log) => {
+            const stamp = formatFollowUpTimestamp(log.createdAt);
+            return (
+              <div key={log.id}>
+                <p className="text-[10px] font-mono text-cyan-600">{stamp.date} {stamp.time} · <span className="text-cyan-300 font-bold">{log.author}</span></p>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">{log.tag} · <span className="normal-case tracking-normal font-semibold text-cyan-300">{log.headline}</span></p>
+                {log.comment && <p className="text-xs text-cyan-100 whitespace-pre-wrap mt-0.5">{log.comment}</p>}
+                {log.photoUrl && (
+                  <button type="button" onClick={() => onPreviewPhoto({ url: log.photoUrl, author: log.author, time: `${stamp.date} ${stamp.time}` })} className="mt-1.5 block w-16 h-16 rounded-lg overflow-hidden border border-cyan-800 hover:opacity-80 transition-all">
+                    <AsyncImage src={log.photoUrl} className="w-full h-full object-cover" alt="Lampiran" />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const DECISION_BUTTON_CLASS = 'flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-[0.98]';
 
 function SecurityDecisionButtons({ onAction, showNeedVerification = true }) {
@@ -952,6 +988,8 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
   }).length + (hasIncidentAction ? 1 : 0);
   const myTaskCount = followUps.filter((followUp) => getFollowUpActions(followUp, simRole, isClosed).canUpdate).length;
   const incidentStatusView = getIncidentStatusView(verificationState, simRole, { approvedCount, total: followUps.length, myTaskCount });
+  const followUpLogs = buildFollowUpLogItems(followUps, securityName, closure, verification, unsolve)
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
   const closeAction = () => setActiveAction(null);
 
   const handleSeedDemo = () => {
@@ -1022,6 +1060,7 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
                 ))}
               </div>
             )}
+            <FollowUpHistoryLog logs={followUpLogs} onPreviewPhoto={onPreviewPhoto} />
           </div>
         )}
       </div>

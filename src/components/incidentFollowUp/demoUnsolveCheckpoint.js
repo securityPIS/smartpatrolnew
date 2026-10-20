@@ -1,9 +1,10 @@
 /*
-Tujuan: Data dummy satu titik checkpoint berstatus UNSOLVE untuk simulasi di halaman patroli: saat
+Tujuan: Data dummy titik checkpoint berstatus UNSOLVE untuk simulasi di halaman patroli: saat
         diklik menampilkan informasi unsolve (temuan awal, catatan PIC Security, foto kondisi saat
         unsolve) beserta pilihan AMAN / TEMUAN.
-Caller: PatrolPage.
-Side Effects: Tidak ada (konstanta); pilihan pada titik contoh tidak membuat laporan.
+Caller: PatrolPage (kartu contoh di mode normal; pilihan hanya toast), followUpStore & data/demoData
+        (akun demo: titik "Pagar Dek Kiri" nyata dengan override ini → AMAN/TEMUAN seperti go live).
+Side Effects: Tidak ada (konstanta).
 */
 
 // Ilustrasi sederhana kondisi pagar dek berkarat (SVG inline, tanpa unduhan).
@@ -22,6 +23,10 @@ const DEMO_UNSOLVE_PHOTO_URL = `data:image/svg+xml;utf8,${encodeURIComponent(`<s
 </svg>`)}`;
 
 const minutesAgoIso = (minutes) => new Date(Date.now() - minutes * 60_000).toISOString();
+
+// Akun demo: titik nyata di kapal demo yang memakai override Unsolve ini (lihat data/demoData.js).
+export const DEMO_SHIP_ID = 'demo-ship-1';
+export const DEMO_UNSOLVE_CHECKPOINT_NAME = 'Pagar Dek Kiri';
 
 export const DEMO_UNSOLVE_CHECKPOINT = {
   item: { id: 'demo-unsolve-checkpoint', name: 'Pagar Dek Kiri (Contoh)' },

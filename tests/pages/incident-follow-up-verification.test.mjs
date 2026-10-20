@@ -109,6 +109,8 @@ test('Unsolve: semua tindak lanjut ditutup, temuan tidak open lagi, foto acuan t
   // Catatan wajib.
   assert.equal(unsolveIncident(incident, { comment: '  ', actorName: 'Sec' }).ok, false);
   assert.deepEqual(unsolveIncident(incident, { comment: 'Butuh docking', photoUrl: 'evidence', actorName: 'Sec' }), { ok: true, referenceUpdated: true });
+  // Status tindak lanjut tetap Approved; hanya temuan yang Unsolved.
+  assert.equal(store.getStoredFollowUp(incident.id, a.id).status, S.APPROVED);
   assert.equal(store.getIncidentVerificationState([{ status: S.UNSOLVED }], undefined, null, { at: 'x' }), V.UNSOLVED);
   assert.equal(isPatrolTemuanOpen(incident, 'open'), false);
   assert.equal(getCheckpointReferenceOverride(getIncidentCheckpointKey(incident)).referencePhotoUrl, 'evidence');

@@ -517,7 +517,6 @@ function UnsolveIncidentModal({ incident, followUps, securityName, onClose, onSu
   const [comment, setComment] = useState('');
   const [photoUrl, setPhotoUrl] = useState(null);
   const canSubmit = Boolean(comment.trim());
-  const openFollowUps = followUps.filter((item) => item.status !== FOLLOW_UP_STATUS.DONE);
   const nextReferencePhotoUrl = getUnsolveReferencePhotoUrl(incident, photoUrl);
   const checkpointName = incident.isPatrol ? incident.location : '';
 
@@ -533,16 +532,16 @@ function UnsolveIncidentModal({ incident, followUps, securityName, onClose, onSu
         <p className="text-[10px] font-bold uppercase tracking-widest text-orange-300">Temuan tidak dapat diselesaikan</p>
         <p className="text-[11px] text-cyan-200 leading-relaxed">
           Status temuan menjadi <span className="font-bold text-orange-300">UNSOLVE</span> (bukan Aman, bukan Closed).
-          {openFollowUps.length > 0 ? ` ${openFollowUps.length} tindak lanjut ikut ditutup.` : ' Belum ada tindak lanjut yang berjalan.'}
+          {followUps.length > 0 ? ` Status ${followUps.length} tindak lanjut tetap Approved.` : ''}
         </p>
       </div>
 
-      {openFollowUps.length > 0 && (
+      {followUps.length > 0 && (
         <div className="space-y-1.5">
-          {openFollowUps.map((followUp) => (
+          {followUps.map((followUp) => (
             <div key={followUp.id} className="flex items-center justify-between gap-2 text-xs">
               <span className="text-cyan-100 truncate">#{followUps.indexOf(followUp) + 1} · {getAssigneeMeta(followUp.assigneeId, securityName).label}</span>
-              <span className="flex items-center gap-1 shrink-0"><StatusBadge view={getFollowUpStatusView(followUp, SECURITY_ASSIGNEE_ID)} /><span className="text-cyan-700">→</span><StatusBadge view={{ label: 'Unsolved', tone: 'unsolved' }} /></span>
+              <span className="shrink-0"><StatusBadge view={getFollowUpStatusView(followUp, SECURITY_ASSIGNEE_ID)} /></span>
             </div>
           ))}
         </div>
@@ -1112,8 +1111,8 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
           onSubmitted={({ ok, referenceUpdated, checkpointName }) => {
             closeAction();
             if (!ok) onToast('Unsolve tidak bisa disimpan: status temuan berubah (semua tindak lanjut harus Approved).');
-            else if (referenceUpdated) onToast(`Temuan ditetapkan UNSOLVE. Semua tindak lanjut ditutup.\nFoto kondisi awal titik ${checkpointName} diperbarui — tombol AMAN tersedia lagi.`);
-            else onToast('Temuan ditetapkan UNSOLVE. Semua tindak lanjut ditutup.');
+            else if (referenceUpdated) onToast(`Temuan ditetapkan UNSOLVE. Status tindak lanjut tetap Approved.\nFoto kondisi awal titik ${checkpointName} diperbarui — tombol AMAN tersedia lagi.`);
+            else onToast('Temuan ditetapkan UNSOLVE. Status tindak lanjut tetap Approved.');
           }}
         />
       )}

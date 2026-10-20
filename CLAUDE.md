@@ -66,8 +66,8 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
 - Status tindak lanjut: Need Action → Need Review → (PIC Security) **Approved** → Done. "Konfirmasi
   Rencana" mengembalikan ke Need Action; hanya "Approve" yang dihitung selesai.
 - Setelah SEMUA tindak lanjut Approved (state `READY`), PIC Security memilih:
-  - **UNSOLVE** (`unsolveIncident(incident, …)`): semua tindak lanjut ditutup (status Unsolve), catatan
-    wajib, evidence opsional. Temuan bukan Aman bukan Closed. Kondisi saat unsolve (evidence, atau foto
+  - **UNSOLVE** (`unsolveIncident(incident, …)`): hanya status temuan jadi Unsolved; status tiap tindak
+    lanjut TETAP Approved (jangan diubah). Catatan wajib, evidence opsional. Temuan bukan Aman bukan Closed. Kondisi saat unsolve (evidence, atau foto
     temuan bila kosong) jadi foto acuan baru titik (`referenceOverridesByCheckpoint`, kunci `shipId|nama`).
   - **NEED VERIFICATION**: `requestIncidentVerification` (notifikasi ke SEMUA petugas security di kapal
     temuan, bukan hanya pelapor → state `AWAITING_VERIFICATION`, salah satu petugas kapal itu verifikasi) ATAU PIC Security verifikasi sendiri

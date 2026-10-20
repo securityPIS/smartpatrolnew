@@ -339,8 +339,8 @@ export function getUnsolveReferencePhotoUrl(incident, evidencePhotoUrl) {
 }
 
 // PIC Security menutup temuan sebagai UNSOLVE setelah semua tindak lanjut Approved (keputusan awal,
-// atau setelah verifikasi belum sesuai): semua tindak lanjut ditutup (status Unsolve), catatan
-// wajib, evidence opsional. Kondisi saat unsolve menjadi foto acuan baru titik checkpoint asal
+// atau setelah verifikasi belum sesuai): hanya status TEMUAN yang menjadi Unsolve — status tiap
+// tindak lanjut tetap Approved. Catatan wajib, evidence opsional. Kondisi saat unsolve menjadi foto acuan baru titik checkpoint asal
 // temuan sehingga patroli berikutnya bisa melapor AMAN terhadap kondisi tersebut.
 // Mengembalikan { ok, referenceUpdated }.
 export function unsolveIncident(incident, { comment, photoUrl = null, actorName }) {
@@ -354,11 +354,6 @@ export function unsolveIncident(incident, { comment, photoUrl = null, actorName 
   const referencePhotoUrl = getUnsolveReferencePhotoUrl(incident, photoUrl);
   const checkpointKey = getIncidentCheckpointKey(incident);
 
-  updateIncidentFollowUps(key, (items) => items.map((item) => (
-    item.status === FOLLOW_UP_STATUS.DONE
-      ? item
-      : { ...item, status: FOLLOW_UP_STATUS.UNSOLVED, entries: [...item.entries, createEntry('unsolve', { actorName, actorRole: 'PIC Security', comment: note, at })] }
-  )));
   unsolvesByIncident.set(key, { id: createId('fu-unsolve'), at, actorName, comment: note, photoUrl: photoUrl || null, referencePhotoUrl, checkpointKey });
   const referenceUpdated = Boolean(checkpointKey && referencePhotoUrl);
   if (referenceUpdated) {

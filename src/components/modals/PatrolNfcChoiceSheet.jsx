@@ -123,7 +123,7 @@ export default function PatrolNfcChoiceSheet({ selection, openTemuan = [], refer
                       </div>
                     )}
                     <div>
-                      <p className="text-[9px] font-bold uppercase tracking-widest text-cyan-600">Catatan Unsolve · PIC Security{referenceOverride.followUpCount ? ` · ${referenceOverride.followUpCount} tindak lanjut ditutup` : ''}</p>
+                      <p className="text-[9px] font-bold uppercase tracking-widest text-cyan-600">Catatan Unsolve · PIC Security{referenceOverride.followUpCount ? ` · ${referenceOverride.followUpCount} tindak lanjut Approved` : ''}</p>
                       <p className="text-[11px] text-cyan-100 whitespace-pre-wrap">{referenceOverride.note}</p>
                     </div>
                     <p className="text-[10px] text-cyan-500">Ditetapkan oleh {referenceOverride.actorName}. Foto di atas adalah kondisi saat unsolve dan menjadi acuan baru — laporkan AMAN bila kondisinya tidak berubah.</p>

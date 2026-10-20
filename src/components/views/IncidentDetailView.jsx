@@ -277,6 +277,9 @@ export default function IncidentDetailView({ isInline = false }) {
   const incidentMapsHref = incidentMapConfig ? `https://www.google.com/maps?q=${incidentMapsQuery}` : '#';
   const followUpSecurityName = (isPic && currentUserRecord?.name) || 'PIC Security';
   const followUpReporterName = selectedIncident.reportedBy || 'Petugas Pelapor';
+  // Verifikasi temuan oleh petugas security mana pun di kapal temuan (akun petugas kapal lain tidak bisa).
+  const followUpPetugasName = (isPetugas && currentUserRecord?.name) || 'Petugas Security';
+  const canPetugasVerifyFollowUp = !isPetugas || canManageIncident(selectedIncident);
   // Tambah update riwayat temuan hanya untuk Petugas (role simulasi); SOS tetap ikut izin asli.
   const canAddHistoryUpdate = canManageDetailActions
     && (!showFollowUpFeature || followUpSimRole === REPORTER_ROLE_ID);
@@ -609,6 +612,8 @@ export default function IncidentDetailView({ isInline = false }) {
                 simRole={followUpSimRole}
                 securityName={followUpSecurityName}
                 reporterName={followUpReporterName}
+                petugasName={followUpPetugasName}
+                canPetugasVerify={canPetugasVerifyFollowUp}
                 isClosed={isFollowUpClosed}
                 onToast={showFollowUpToast}
                 onPreviewPhoto={setPreviewPhoto}

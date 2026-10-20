@@ -245,8 +245,8 @@ export function returnFollowUpToPic(incidentId, followUpId, { comment, actorName
   resetVerificationDecision(incidentId);
 }
 
-// PIC Security memilih NEED VERIFICATION setelah semua tindak lanjut Approved → notifikasi ke petugas
-// security untuk memverifikasi temuan. Mengembalikan true bila berhasil.
+// PIC Security memilih NEED VERIFICATION setelah semua tindak lanjut Approved → notifikasi ke semua
+// petugas security di kapal temuan; salah satu dari mereka memverifikasi. Mengembalikan true bila berhasil.
 export function requestIncidentVerification(incidentId, { comment = '', actorName }) {
   const key = String(incidentId || '');
   if (getStoredIncidentState(key) !== INCIDENT_VERIFICATION_STATE.READY) return false;
@@ -374,8 +374,8 @@ export function seedDemoFollowUps(incident, { securityName }) {
 }
 
 const VERIFICATION_LOG_HEADLINE = {
-  request: 'PIC Security memilih NEED VERIFICATION — notifikasi verifikasi dikirim ke petugas security',
-  reverify: 'PIC Security meminta verifikasi ulang ke petugas security',
+  request: 'PIC Security memilih NEED VERIFICATION — notifikasi verifikasi dikirim ke petugas security kapal',
+  reverify: 'PIC Security meminta verifikasi ulang ke petugas security kapal',
 };
 
 const ENTRY_LOG_LABEL = {

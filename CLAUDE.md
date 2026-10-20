@@ -69,8 +69,8 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
   - **UNSOLVE** (`unsolveIncident(incident, …)`): semua tindak lanjut ditutup (status Unsolve), catatan
     wajib, evidence opsional. Temuan bukan Aman bukan Closed. Kondisi saat unsolve (evidence, atau foto
     temuan bila kosong) jadi foto acuan baru titik (`referenceOverridesByCheckpoint`, kunci `shipId|nama`).
-  - **NEED VERIFICATION**: `requestIncidentVerification` (notifikasi ke petugas security → state
-    `AWAITING_VERIFICATION`, petugas verifikasi) ATAU PIC Security verifikasi sendiri
+  - **NEED VERIFICATION**: `requestIncidentVerification` (notifikasi ke SEMUA petugas security di kapal
+    temuan, bukan hanya pelapor → state `AWAITING_VERIFICATION`, salah satu petugas kapal itu verifikasi) ATAU PIC Security verifikasi sendiri
     (`submitIncidentVerification(..., { bySecurity: true })`). Sesuai → semua Done + Closed.
   - Belum sesuai → `awaitingSecurityDecision`; PIC Security: `returnFollowUpToPic`, assign baru,
     `requestReverification`, atau Unsolve. Assign baru / kembalikan ke PIC membatalkan permintaan verifikasi.

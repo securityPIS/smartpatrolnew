@@ -375,16 +375,16 @@ function ReviewFollowUpModal({ incident, followUp, sequence, securityName, onClo
   );
 }
 
-function VerifyIncidentModal({ incident, followUps, securityName, reporterName, bySecurity = false, onClose, onSubmitted }) {
+function VerifyIncidentModal({ incident, followUps, securityName, petugasName, bySecurity = false, onClose, onSubmitted }) {
   const [approved, setApproved] = useState(null);
   const [comment, setComment] = useState('');
   const [photoUrl, setPhotoUrl] = useState(null);
   const canSubmit = approved !== null && Boolean(comment.trim()) && Boolean(photoUrl);
-  const verifierLabel = bySecurity ? `PIC Security (${securityName}) · verifikasi sendiri` : `Petugas Security (${reporterName})`;
+  const verifierLabel = bySecurity ? `PIC Security (${securityName}) · verifikasi sendiri` : `Petugas Security (${petugasName})`;
 
   const handleSubmit = () => {
     if (!canSubmit) return;
-    const result = submitIncidentVerification(incident.id, { approved, comment: comment.trim(), photoUrl, actorName: bySecurity ? securityName : reporterName, bySecurity });
+    const result = submitIncidentVerification(incident.id, { approved, comment: comment.trim(), photoUrl, actorName: bySecurity ? securityName : petugasName, bySecurity });
     onSubmitted({ approved, ...result });
   };
 
@@ -445,7 +445,7 @@ function ReturnFollowUpModal({ incident, followUp, sequence, securityName, onClo
   );
 }
 
-function ReverifyRequestModal({ incident, reporterName, securityName, onClose, onSubmitted }) {
+function ReverifyRequestModal({ incident, verifierTargetLabel, securityName, onClose, onSubmitted }) {
   const [comment, setComment] = useState('');
   const canSubmit = Boolean(comment.trim());
   const handleSubmit = () => {
@@ -454,7 +454,7 @@ function ReverifyRequestModal({ incident, reporterName, securityName, onClose, o
     onSubmitted();
   };
   return (
-    <FollowUpModal title="Minta Verifikasi Ulang" subtitle={`Ke petugas security · ${reporterName}`} onClose={onClose} onSubmit={handleSubmit} submitLabel="Kirim" canSubmit={canSubmit}>
+    <FollowUpModal title="Minta Verifikasi Ulang" subtitle={`Ke ${verifierTargetLabel}`} onClose={onClose} onSubmit={handleSubmit} submitLabel="Kirim" canSubmit={canSubmit}>
       <div>
         <label className={LABEL_CLASS}>Catatan untuk petugas <span className="text-rose-400">*</span></label>
         <textarea autoFocus value={comment} onChange={(event) => setComment(event.target.value)} rows={3} placeholder="Contoh: tindak lanjut sudah sesuai instruksi, mohon dicek ulang bagian ..." className={TEXTAREA_CLASS} />
@@ -466,7 +466,7 @@ function ReverifyRequestModal({ incident, reporterName, securityName, onClose, o
 const VERIFY_ACTION_CLASS = 'bg-fuchsia-600 hover:bg-fuchsia-500 shadow-fuchsia-500/20 border-fuchsia-400/20';
 
 // NEED VERIFICATION: kirim notifikasi verifikasi ke petugas security, atau PIC Security verifikasi sendiri.
-function NeedVerificationModal({ incident, reporterName, securityName, onClose, onRequested, onVerifySelf }) {
+function NeedVerificationModal({ incident, verifierTargetLabel, securityName, onClose, onRequested, onVerifySelf }) {
   const [comment, setComment] = useState('');
 
   const handleRequest = () => {
@@ -483,7 +483,7 @@ function NeedVerificationModal({ incident, reporterName, securityName, onClose, 
     <FollowUpModal title="Need Verification" subtitle={`${incident.location || 'Temuan'} · semua tindak lanjut Approved`} onClose={onClose} actions={actions}>
       <div className="p-3 rounded-xl border border-fuchsia-500/40 bg-fuchsia-500/5 space-y-1.5">
         <p className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Pilih cara verifikasi</p>
-        <p className="text-[11px] text-cyan-200 leading-relaxed"><span className="font-bold text-fuchsia-200">Kirim ke Petugas</span>: notifikasi dikirim ke petugas security ({reporterName}) untuk memverifikasi kondisi di lapangan.</p>
+        <p className="text-[11px] text-cyan-200 leading-relaxed"><span className="font-bold text-fuchsia-200">Kirim ke Petugas</span>: notifikasi dikirim ke {verifierTargetLabel}; salah satu petugas memverifikasi kondisi di lapangan.</p>
         <p className="text-[11px] text-cyan-200 leading-relaxed"><span className="font-bold text-sky-200">Verifikasi Sendiri</span>: PIC Security langsung mengisi hasil verifikasi beserta evidence.</p>
       </div>
       <div>
@@ -791,7 +791,7 @@ function SecurityDecisionButtons({ onAction, showNeedVerification = true }) {
   );
 }
 
-function IncidentVerificationCard({ state, followUps, verification, closure, simRole, securityName, reporterName, onAction }) {
+function IncidentVerificationCard({ state, followUps, verification, closure, simRole, securityName, reporterName, verifierTargetLabel, canPetugasVerify, onAction }) {
   if (state === INCIDENT_VERIFICATION_STATE.NO_FOLLOW_UP || state === INCIDENT_VERIFICATION_STATE.UNSOLVED) return null;
   const approvedCount = followUps.filter((item) => item.status === FOLLOW_UP_STATUS.APPROVED || item.status === FOLLOW_UP_STATUS.DONE).length;
   const lastVerify = [...(verification?.entries || [])].reverse().find((entry) => entry.kind === 'verify');
@@ -863,12 +863,15 @@ function IncidentVerificationCard({ state, followUps, verification, closure, sim
           <div className="min-w-0">
             <p className="text-xs font-bold text-fuchsia-200 uppercase tracking-widest">Need Verification</p>
             <p className="text-[11px] text-cyan-400 mt-0.5">
-              {isReporter ? `Notifikasi dari PIC Security${stamp ? ` · ${stamp.date} ${stamp.time}` : ''}: mohon verifikasi kondisi temuan di lapangan.` : `Menunggu verifikasi petugas security (${reporterName}).`}
+              {isReporter ? `Notifikasi dari PIC Security${stamp ? ` · ${stamp.date} ${stamp.time}` : ''}: mohon verifikasi kondisi temuan di lapangan.` : `Menunggu verifikasi dari ${verifierTargetLabel}.`}
             </p>
             {lastRequest?.comment && <p className="text-xs text-cyan-100 whitespace-pre-wrap mt-1">"{lastRequest.comment}"</p>}
           </div>
         </div>
-        {isReporter && (
+        {isReporter && !canPetugasVerify && (
+          <p className="text-[11px] text-amber-200/90">Hanya {verifierTargetLabel} yang dapat memverifikasi temuan ini.</p>
+        )}
+        {isReporter && canPetugasVerify && (
           <button type="button" onClick={() => onAction('verify')} className="w-full py-3 bg-fuchsia-600 text-white rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-fuchsia-500 transition-all active:scale-[0.98]">
             <CheckCircle2 className="w-4 h-4" /> <span className="text-xs font-black uppercase tracking-widest">Verifikasi Temuan</span>
           </button>
@@ -893,12 +896,14 @@ function IncidentVerificationCard({ state, followUps, verification, closure, sim
   );
 }
 
-export function FollowUpSectionList({ incident, followUps, verification, closure, unsolve = null, simRole, securityName, reporterName, isClosed, onToast, onPreviewPhoto }) {
+export function FollowUpSectionList({ incident, followUps, verification, closure, unsolve = null, simRole, securityName, reporterName, petugasName = 'Petugas Security', canPetugasVerify = true, isClosed, onToast, onPreviewPhoto }) {
+  // Need Verification ditujukan ke semua petugas security di kapal temuan, bukan hanya pelapor.
+  const verifierTargetLabel = `petugas security kapal ${incident?.shipName || 'ini'}`;
   const [activeAction, setActiveAction] = useState(null);
   const [isListExpanded, setIsListExpanded] = useState(false);
   const approvedCount = followUps.filter((followUp) => followUp.status === FOLLOW_UP_STATUS.APPROVED || followUp.status === FOLLOW_UP_STATUS.DONE).length;
   const verificationState = getIncidentVerificationState(followUps, verification, closure, unsolve);
-  const hasIncidentAction = (verificationState === INCIDENT_VERIFICATION_STATE.AWAITING_VERIFICATION && simRole === REPORTER_ROLE_ID)
+  const hasIncidentAction = (verificationState === INCIDENT_VERIFICATION_STATE.AWAITING_VERIFICATION && simRole === REPORTER_ROLE_ID && canPetugasVerify)
     || ((verificationState === INCIDENT_VERIFICATION_STATE.READY || verificationState === INCIDENT_VERIFICATION_STATE.AWAITING_SECURITY) && simRole === SECURITY_ASSIGNEE_ID);
   const myActionCount = followUps.filter((followUp) => {
     const { canUpdate, canReview } = getFollowUpActions(followUp, simRole, isClosed);
@@ -948,6 +953,8 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
                   simRole={simRole}
                   securityName={securityName}
                   reporterName={reporterName}
+                  verifierTargetLabel={verifierTargetLabel}
+                  canPetugasVerify={canPetugasVerify}
                   onAction={(type) => setActiveAction({ type })}
                 />
                 {followUps.map((followUp, index) => (
@@ -1017,7 +1024,7 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
           incident={incident}
           followUps={followUps}
           securityName={securityName}
-          reporterName={reporterName}
+          petugasName={petugasName}
           bySecurity={activeAction.type === 'verify-self'}
           onClose={closeAction}
           onSubmitted={({ approved, ok, closed }) => {
@@ -1031,14 +1038,14 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
       {activeAction?.type === 'need-verification' && (
         <NeedVerificationModal
           incident={incident}
-          reporterName={reporterName}
+          verifierTargetLabel={verifierTargetLabel}
           securityName={securityName}
           onClose={closeAction}
           onVerifySelf={() => setActiveAction({ type: 'verify-self' })}
           onRequested={(ok) => {
             closeAction();
             onToast(ok
-              ? `Need Verification: notifikasi terkirim ke petugas security (${reporterName}) untuk memverifikasi temuan.`
+              ? `Need Verification: notifikasi terkirim ke ${verifierTargetLabel} untuk memverifikasi temuan.`
               : 'Permintaan verifikasi tidak bisa dikirim: status tindak lanjut berubah.');
           }}
         />
@@ -1060,12 +1067,12 @@ export function FollowUpSectionList({ incident, followUps, verification, closure
       {activeAction?.type === 'reverify' && (
         <ReverifyRequestModal
           incident={incident}
-          reporterName={reporterName}
+          verifierTargetLabel={verifierTargetLabel}
           securityName={securityName}
           onClose={closeAction}
           onSubmitted={() => {
             closeAction();
-            onToast(`Permintaan verifikasi ulang dikirim ke petugas security (${reporterName}).`);
+            onToast(`Permintaan verifikasi ulang dikirim ke ${verifierTargetLabel}.`);
           }}
         />
       )}

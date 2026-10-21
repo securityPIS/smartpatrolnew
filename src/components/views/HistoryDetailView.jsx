@@ -82,7 +82,7 @@ function getLatestCompletedCheckpoint(checkpoints = []) {
   }, null);
 }
 
-export default function HistoryDetailView({ isInline = false, entryData = null, onSummaryCardClick = null, hideTimeAudit = false, customTimeBadge = null }) {
+export default function HistoryDetailView({ isInline = false, entryData = null, onSummaryCardClick = null, hideTimeAudit = false, customTimeBadge = null, crewBadge = null }) {
   const { selectedHistoryEntry } = useHistory();
   const { operationalShip, operationalShipName } = useShips();
   const { weatherInfo, weatherLoading, getWeatherDetail } = useWeather();
@@ -294,7 +294,10 @@ export default function HistoryDetailView({ isInline = false, entryData = null, 
         </div>
 
         <div className="space-y-3 pb-8">
-          <h3 className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-1 pl-1">Petugas Jaga</h3>
+          <div className="flex items-center justify-between gap-2 mb-1 pl-1">
+            <h3 className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest">Petugas Jaga</h3>
+            {crewBadge}
+          </div>
           {displayCrew.length === 0 && (
             <p className="text-xs text-cyan-700 italic border border-dashed border-cyan-900/50 p-4 rounded-xl text-center">
               Belum ada data petugas jaga untuk shift ini.

@@ -168,7 +168,7 @@ const PatrolPage = React.memo(function PatrolPage() {
     handleActionClick, handleOpenPatrolResult, handleAddCustomPatrolNode,
     completedCount, totalCount, progressPercentage, newCustomNode, setNewCustomNode,
     checkpoints, activeShiftGuardSnapshot, currentShiftMeta, currentShiftSchedule, canPatrolCurrentShip, canAddTemporaryPatrolNode,
-    activeForms, isShiftStatusRequired, isCurrentShiftStatusCompleted, showShiftStatusModal, openShiftStatusModal,
+    activeForms, isShiftStatusRequired, isCurrentShiftStatusCompleted, showShiftStatusModal, openShiftStatusModal, currentShiftStatusRecord,
     pendingPatrolCameraCapture,
   } = usePatrol();
   const { operationalShip, operationalShipName, shipsData } = useShips();
@@ -523,6 +523,29 @@ const PatrolPage = React.memo(function PatrolPage() {
       ? ensureArray(selectedHistoryEntry?.crewSnapshot).filter(user => user?.role === ACCESS_ROLES.PETUGAS)
       : ensureArray(activeShiftGuardSnapshot)
   ), [activeShiftGuardSnapshot, isHistoryMode, selectedHistoryEntry?.crewSnapshot]);
+  // Mode demo: ringkasan absensi shift berjalan sebagai SATU badge di tab Info (Petugas Jaga).
+  const attendanceBadge = React.useMemo(() => {
+    if (!isDemoMode || isHistoryMode) return null;
+    const items = ensureArray(currentShiftStatusRecord?.items);
+    const attended = items.filter(item => item.attendancePhotoUrl);
+    if (!attended.length) {
+      return <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded border border-amber-500/50 bg-amber-500/10 text-amber-300">Belum absensi</span>;
+    }
+    const notWell = attended.filter(item => item.condition === 'tidak_baik');
+    const resting = attended.filter(item => item.status === 'istirahat').length;
+    const detail = attended
+      .map(item => `${item.name}: ${item.status === 'istirahat' ? 'Istirahat' : 'Patroli'}, ${item.condition === 'tidak_baik' ? `Tidak Baik (${item.conditionNote || '-'})` : 'Baik'}`)
+      .join('\n');
+    return (
+      <span
+        title={detail}
+        className={`text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded border ${notWell.length ? 'border-rose-500/50 bg-rose-500/10 text-rose-300' : 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300'}`}
+      >
+        Absensi {attended.length}/{items.length} · {resting} istirahat{notWell.length ? ` · ${notWell.length} tidak baik` : ' · kondisi baik'}
+      </span>
+    );
+  }, [currentShiftStatusRecord, isHistoryMode]);
+
   const infoEntryData = React.useMemo(() => (
     isHistoryMode
       ? selectedHistoryEntry
@@ -684,6 +707,7 @@ const PatrolPage = React.memo(function PatrolPage() {
     <HistoryDetailView
       isInline={true}
       entryData={infoEntryData}
+      crewBadge={attendanceBadge}
       onSummaryCardClick={handleOpenSummaryDetail}
       customTimeBadge={
         <div className="flex flex-wrap items-center gap-2 bg-[#0b1229] border border-cyan-800/50 rounded-2xl p-4 shadow-sm">

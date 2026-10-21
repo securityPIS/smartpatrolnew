@@ -68,10 +68,11 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
   `PatrolTemuanUpdateModal`: WAJIB isi update untuk SEMUA temuan open di titik → `handleAddProgress(id,
   { comment, photoUrl })`. Flag: "Temuan Open · x temuan baru & y update temuan" (hitungan shift berjalan:
   temuan dgn shiftKey shift ini, progress dalam rentang jam shift).
-- Demo: "Status Shift" diganti ABSENSI (`ShiftAttendanceModal`): tiap pergantian shift SEMUA petugas kapal
-  wajib absen — foto (capture user), Patroli/Istirahat, kondisi Baik/Tidak Baik (+keterangan wajib bila
-  Tidak Baik). Disimpan lewat `handleSaveCurrentShiftStatus` (item menyimpan attendancePhotoUrl/condition/
-  conditionNote). Go live tetap `ShiftStatusModal`. Hasil absensi = SATU badge di tab Info (sebelah judul
+- Demo: "Status Shift" diganti ABSENSI (`ShiftAttendanceModal`): tiap pergantian shift setiap petugas absen
+  SENDIRI di HP masing-masing (form hanya untuk user login, tanpa kartu info) — foto (capture user),
+  Patroli/Istirahat, kondisi Baik/Tidak Baik (+keterangan wajib bila Tidak Baik). Simpan = item rekan di
+  record dipertahankan + item sendiri diganti (`handleSaveCurrentShiftStatus`). Gerbang checklist demo:
+  `isCurrentShiftStatusCompleted` = petugas login punya item ber-`attendancePhotoUrl` di shift ini. Go live tetap `ShiftStatusModal`. Hasil absensi = SATU badge di tab Info (sebelah judul
   "Petugas Jaga", prop `crewBadge` HistoryDetailView): "Absensi x/y · n istirahat · n tidak baik".
 - Fungsi `subscribeTo*` di services/backend harus return noop bila `!isSupabaseConfigured` (dulu throw →
   crash dashboard admin). Satu-satunya request backend di demo: trusted time `server-time` (baca jam saja).

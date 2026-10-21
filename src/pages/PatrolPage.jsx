@@ -807,7 +807,7 @@ const PatrolPage = React.memo(function PatrolPage() {
                     <p className="text-[10px] font-bold uppercase tracking-widest text-amber-300">{isDemoMode ? 'Absensi Wajib Diisi' : 'Status Shift Wajib Diisi'}</p>
                     <p className="mt-2 text-sm text-amber-100">
                       {isDemoMode
-                        ? 'Checklist patroli masih terkunci sampai semua petugas shift ini absen (foto, status, kondisi).'
+                        ? 'Checklist patroli masih terkunci sampai Anda absen untuk shift ini (foto, status, kondisi).'
                         : 'Checklist patroli masih terkunci sampai status petugas shift ini disimpan.'}
                     </p>
                   </div>

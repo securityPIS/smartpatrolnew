@@ -5528,7 +5528,16 @@ export function AppProvider({ children }) {
     && !selectedHistoryEntry
     && activeOperationalGuards.length > 0
   );
-  const isCurrentShiftStatusCompleted = !isShiftStatusRequired || hasFilledShiftStatusRecord(currentShiftStatusRecord);
+  // Mode demo (absensi): tiap petugas absen di HP masing-masing → checklist terbuka setelah PETUGAS YANG
+  // LOGIN sudah absen (foto) di shift ini. User yang bukan petugas kapal ini memakai aturan lama.
+  const isCurrentUserShiftGuard = Boolean(
+    isPetugas && currentUserRecord?.id && activeOperationalGuards.some(user => user.id === currentUserRecord.id),
+  );
+  const isCurrentShiftStatusCompleted = !isShiftStatusRequired || (
+    isDemoMode && isCurrentUserShiftGuard
+      ? ensureArray(currentShiftStatusRecord?.items).some(item => item.userId === currentUserRecord.id && item.attendancePhotoUrl)
+      : hasFilledShiftStatusRecord(currentShiftStatusRecord)
+  );
   const canAddTemporaryPatrolNode = Boolean(isPetugas && canPatrolCurrentShip && operationalShip && !selectedHistoryEntry);
   const shouldForcePatrolCameraCapture = true;
 

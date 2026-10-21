@@ -1297,11 +1297,16 @@ function normalizeShiftStatusItems(items = []) {
     if (!itemKey || seenItemKeys.has(itemKey)) return normalizedItems;
 
     seenItemKeys.add(itemKey);
+    // Absensi (mode demo): foto & kondisi petugas ikut disimpan bila ada.
+    const attendancePhotoUrl = sanitizeUrl(item?.attendancePhotoUrl || '') || null;
+    const condition = item?.condition === 'tidak_baik' ? 'tidak_baik' : item?.condition === 'baik' ? 'baik' : null;
     normalizedItems.push({
       userId: userId || null,
       name,
       role: ACCESS_ROLES.PETUGAS,
       status: normalizeShiftGuardStatusValue(item?.status),
+      ...(attendancePhotoUrl ? { attendancePhotoUrl } : {}),
+      ...(condition ? { condition, conditionNote: sanitizeMultilineText(item?.conditionNote || '', 200) } : {}),
     });
 
     return normalizedItems;
@@ -7967,6 +7972,9 @@ export function AppProvider({ children }) {
         status: normalizeShiftGuardStatusValue(
           matchedItem?.status || guard.shiftStatus || SHIFT_GUARD_STATUS.PATROLI,
         ),
+        attendancePhotoUrl: matchedItem?.attendancePhotoUrl || null,
+        condition: matchedItem?.condition || null,
+        conditionNote: matchedItem?.conditionNote || '',
       };
     });
 

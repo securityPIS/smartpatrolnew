@@ -30,6 +30,7 @@ import {
 import AsyncImage from '../components/AsyncImage';
 import HistoryDetailView from '../components/views/HistoryDetailView';
 import ShiftStatusModal from '../components/modals/ShiftStatusModal';
+import ShiftAttendanceModal from '../components/modals/ShiftAttendanceModal';
 
 function ensureArray(value) {
   return Array.isArray(value) ? value : [];
@@ -712,7 +713,8 @@ const PatrolPage = React.memo(function PatrolPage() {
 
   return (
     <div className="flex h-full overflow-hidden">
-      {showShiftStatusModal && <ShiftStatusModal />}
+      {/* Mode demo: status shift diganti absensi petugas (foto, status, kondisi). */}
+      {showShiftStatusModal && (isDemoMode ? <ShiftAttendanceModal /> : <ShiftStatusModal />)}
 
       {/* Left Pane: List and Search */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 animate-in fade-in flex flex-col min-h-full scrollbar-thin scrollbar-thumb-cyan-900/50">
@@ -778,9 +780,11 @@ const PatrolPage = React.memo(function PatrolPage() {
               <div className="rounded-2xl border border-amber-500/30 bg-amber-950/20 p-4 shadow-sm">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-amber-300">Status Shift Wajib Diisi</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-amber-300">{isDemoMode ? 'Absensi Wajib Diisi' : 'Status Shift Wajib Diisi'}</p>
                     <p className="mt-2 text-sm text-amber-100">
-                      Checklist patroli masih terkunci sampai status petugas shift ini disimpan.
+                      {isDemoMode
+                        ? 'Checklist patroli masih terkunci sampai semua petugas shift ini absen (foto, status, kondisi).'
+                        : 'Checklist patroli masih terkunci sampai status petugas shift ini disimpan.'}
                     </p>
                   </div>
                   <button
@@ -788,7 +792,7 @@ const PatrolPage = React.memo(function PatrolPage() {
                     onClick={openShiftStatusModal}
                     className="shrink-0 rounded-xl border border-amber-400/40 bg-amber-500/15 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-amber-100 transition hover:bg-amber-500/25"
                   >
-                    Isi Status
+                    {isDemoMode ? 'Isi Absensi' : 'Isi Status'}
                   </button>
                 </div>
               </div>

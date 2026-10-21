@@ -72,7 +72,7 @@ function resizeImageFile(file, maxSize = 1280) {
   });
 }
 
-export function PhotoField({ label, value, onChange, required = false }) {
+export function PhotoField({ label, value, onChange, required = false, capture = 'environment' }) {
   const inputRef = useRef(null);
 
   const handleFileChange = async (event) => {
@@ -86,7 +86,7 @@ export function PhotoField({ label, value, onChange, required = false }) {
   return (
     <div className="space-y-2.5">
       <label className={LABEL_CLASS}>{label} {required ? <span className="text-rose-400">*</span> : <span className="text-cyan-700 normal-case">(opsional)</span>}</label>
-      <input ref={inputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFileChange} />
+      <input ref={inputRef} type="file" accept="image/*" capture={capture} className="hidden" onChange={handleFileChange} />
       {!value ? (
         <button type="button" onClick={() => inputRef.current?.click()} className="w-full py-6 rounded-2xl border-2 border-dashed border-cyan-800/30 bg-[#070b19]/40 text-cyan-600 text-xs font-bold flex flex-col items-center justify-center gap-2 hover:text-cyan-400 transition-all group">
           <Camera className="w-6 h-6 text-cyan-700 group-hover:text-emerald-500" />

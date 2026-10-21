@@ -8097,9 +8097,27 @@ export function AppProvider({ children }) {
           : null,
         ...trustedTimestamp,
       };
-      updateOperationalShipCheckpoints(shipCheckpoints => shipCheckpoints.map((checkpoint) => (
-        String(checkpoint.id) === String(id) ? submittedItem : checkpoint
-      )));
+      // Mode demo: titik yang sudah dilapor di shift ini boleh di-scan lagi. Temuan baru di titik yang
+      // sudah TEMUAN dicatat sebagai temuan tambahan (laporan pertama tetap); temuan baru di titik AMAN
+      // mengubah titik jadi TEMUAN (laporan AMAN disimpan di previousReports).
+      const isRepeatDemoReport = isDemoMode && currentCheckpoint.status === 'completed';
+      const isAdditionalTemuan = isRepeatDemoReport && formState.type === 'temuan' && currentCheckpoint.resultType === 'temuan';
+      if (isAdditionalTemuan) {
+        setIncidentsData(previousIncidents => [createPatrolIncidentRecord(submittedItem), ...previousIncidents]);
+      } else {
+        const reportToSave = isRepeatDemoReport
+          ? {
+            ...submittedItem,
+            previousReports: [
+              ...ensureArray(currentCheckpoint.previousReports),
+              { ...currentCheckpoint, previousReports: undefined },
+            ],
+          }
+          : submittedItem;
+        updateOperationalShipCheckpoints(shipCheckpoints => shipCheckpoints.map((checkpoint) => (
+          String(checkpoint.id) === String(id) ? reportToSave : checkpoint
+        )));
+      }
       setActiveForms(prev => {
         const newForms = { ...prev };
         delete newForms[id];
@@ -8128,7 +8146,7 @@ export function AppProvider({ children }) {
       // bukan di sini. Sebelumnya signal prematur menyebabkan Device B fetch data lama.
       // notifyOnError menampilkan ke layar bila laporan gagal/terblokir sampai ke server
       // (RLS/izin/offline) — penting karena di HP Console tak bisa dibuka.
-      void syncPatrolReportToDomain(submittedItem, { notifyOnError: true });
+      if (!isAdditionalTemuan) void syncPatrolReportToDomain(submittedItem, { notifyOnError: true });
       requestCloudSync('urgent');
     } finally {
       setSubmittingPatrolId(previousId => (previousId === id ? null : previousId));
@@ -9171,7 +9189,9 @@ export function AppProvider({ children }) {
   }, [clearUserManagementFeedback, isAdmin]);
 
   // Progress & incident meta handlers
-  const handleAddProgress = useCallback(async (incidentId) => {
+  // progressOverride: { comment, photoUrl } dipakai form "Update Temuan" multi-temuan di halaman patroli
+  // (tanpa menyentuh draft newProgress milik detail temuan).
+  const handleAddProgress = useCallback(async (incidentId, progressOverride = null) => {
     const incident = allIncidents.find(item => item.id === incidentId) || selectedIncident;
     if (!canManageIncident(incident)) return;
     if (showTrustedTimeGateDialog()) return;
@@ -9181,12 +9201,13 @@ export function AppProvider({ children }) {
     const time = formatAppTime(trustedNow);
     const date = formatAppDate(trustedNow);
 
-    const localPhotoUrl = newProgress.photoUrl;
+    const progressDraft = progressOverride || newProgress;
+    const localPhotoUrl = progressDraft.photoUrl || null;
     const progressId = `progress-${trustedTimestamp.occurredAtTrustedMs}-${Math.random().toString(36).slice(2, 8)}`;
     const progressRecord = {
       id: progressId,
-      ...newProgress,
-      comment: sanitizeMultilineText(newProgress.comment, 240),
+      ...progressDraft,
+      comment: sanitizeMultilineText(progressDraft.comment, 240),
       photoUrl: localPhotoUrl,
       time,
       date,
@@ -9238,7 +9259,7 @@ export function AppProvider({ children }) {
       dedupeKey: `incident-progress:${incidentId}:${progressId}`,
       createdAt,
     }]);
-    setNewProgress({ comment: '', photoUrl: null, heroUrl: null, thumbUrl: null });
+    if (!progressOverride) setNewProgress({ comment: '', photoUrl: null, heroUrl: null, thumbUrl: null });
 
     void syncIncidentDetailToDomain(incident, domainMeta || nextMeta, {
       incidentId,

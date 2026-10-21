@@ -2,7 +2,8 @@
 Tujuan: Sheet pilihan hasil patroli setelah petugas tap NFC (atau simulasi tap) di titik checkpoint —
         menampilkan foto kondisi awal (acuan) lalu pilihan AMAN / TEMUAN. Bila masih ada temuan OPEN
         di titik ini, pilihannya menjadi TEMUAN BARU / UPDATE TEMUAN. Setelah temuan Unsolve, foto
-        acuan diganti kondisi saat unsolve.
+        acuan diganti kondisi saat unsolve. Mode demo: titik yang sudah dilapor AMAN di-scan lagi →
+        hanya TEMUAN BARU; UPDATE TEMUAN bisa meng-update semua temuan open sekaligus.
 Caller: PatrolPage (hasil usePatrolNfcScan, atau tombol Simulasi Tap di item checkpoint).
 Dependensi: AsyncImage, useFocusTrap.
 */
@@ -38,7 +39,7 @@ function OpenTemuanCard({ incident, onClick }) {
     : <div className={className}>{content}</div>;
 }
 
-export default function PatrolNfcChoiceSheet({ selection, openTemuan = [], referenceOverride = null, reportBlockedReason = '', parentName, onChoose, onUpdateTemuan, onClose, onPreviewPhoto }) {
+export default function PatrolNfcChoiceSheet({ selection, openTemuan = [], referenceOverride = null, reportBlockedReason = '', onlyNewTemuan = false, parentName, onChoose, onUpdateTemuan, onUpdateAllTemuan, onClose, onPreviewPhoto }) {
   const dialogRef = useFocusTrap(Boolean(selection));
   const [isPickingTemuan, setIsPickingTemuan] = React.useState(false);
   if (!selection) return null;
@@ -49,7 +50,9 @@ export default function PatrolNfcChoiceSheet({ selection, openTemuan = [], refer
   const isSub = definition?.type === 'sub';
 
   const handleUpdateTemuan = () => {
-    if (openTemuan.length === 1) onUpdateTemuan(openTemuan[0]);
+    // Update semua sekaligus (wajib untuk setiap temuan open) bila disediakan caller.
+    if (onUpdateAllTemuan) onUpdateAllTemuan(openTemuan);
+    else if (openTemuan.length === 1) onUpdateTemuan(openTemuan[0]);
     else setIsPickingTemuan(true);
   };
 
@@ -140,11 +143,23 @@ export default function PatrolNfcChoiceSheet({ selection, openTemuan = [], refer
                 </div>
               )}
 
-              <p className="text-xs font-bold text-cyan-200 text-center pt-1">{hasOpenTemuan ? 'Apa yang ingin dilaporkan?' : 'Bagaimana kondisi titik ini?'}</p>
+              <p className="text-xs font-bold text-cyan-200 text-center pt-1">{hasOpenTemuan || onlyNewTemuan ? 'Apa yang ingin dilaporkan?' : 'Bagaimana kondisi titik ini?'}</p>
+              {onlyNewTemuan && !hasOpenTemuan && (
+                <p className="text-[11px] text-emerald-300/90 text-center px-2">Titik ini sudah dilaporkan AMAN pada shift ini. Laporkan temuan baru bila ada perubahan kondisi.</p>
+              )}
               {reportBlockedReason && (
                 <p role="alert" className="text-[11px] text-amber-200 text-center px-2 py-2 rounded-xl border border-amber-500/40 bg-amber-950/20">{reportBlockedReason}</p>
               )}
-              {hasOpenTemuan ? (
+              {onlyNewTemuan && !hasOpenTemuan ? (
+                <button
+                  type="button"
+                  onClick={() => onChoose('temuan')}
+                  disabled={Boolean(reportBlockedReason)}
+                  className="disabled:opacity-40 w-full py-5 rounded-2xl border border-yellow-500/50 bg-yellow-500/10 hover:bg-yellow-500/25 text-yellow-100 font-black tracking-widest flex flex-col items-center gap-2 transition-colors"
+                >
+                  <FilePlus2 className="w-8 h-8 text-yellow-400" /> TEMUAN BARU
+                </button>
+              ) : hasOpenTemuan ? (
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"

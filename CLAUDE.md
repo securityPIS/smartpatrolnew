@@ -61,6 +61,13 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
 - Kapal demo punya titik "Pagar Dek Kiri" yang di-seed Unsolve (override foto acuan di followUpStore saat
   isDemoMode) → AMAN/TEMUAN membuat laporan sungguhan (data dummy), seperti go live. Kartu contoh
   "Pagar Dek Kiri (Contoh)" hanya tampil di mode normal. Peringatan "Sinkronisasi nonaktif" dimatikan di demo.
+- Patroli DEMO saja (go live tetap 1 laporan/titik/shift): titik yang sudah dilapor bisa di-scan lagi
+  (bar = tap, tombol ikon laporan untuk detail; NFC hook `allowCompleted`). Titik AMAN → hanya TEMUAN BARU
+  (titik jadi TEMUAN, laporan lama di `previousReports`). Titik TEMUAN → temuan baru tambahan masuk
+  `incidentsData` (createPatrolIncidentRecord) tanpa menimpa laporan pertama. UPDATE TEMUAN →
+  `PatrolTemuanUpdateModal`: WAJIB isi update untuk SEMUA temuan open di titik → `handleAddProgress(id,
+  { comment, photoUrl })`. Flag: "Temuan Open · x temuan baru & y update temuan" (hitungan shift berjalan:
+  temuan dgn shiftKey shift ini, progress dalam rentang jam shift).
 - Fungsi `subscribeTo*` di services/backend harus return noop bila `!isSupabaseConfigured` (dulu throw →
   crash dashboard admin). Satu-satunya request backend di demo: trusted time `server-time` (baca jam saja).
 

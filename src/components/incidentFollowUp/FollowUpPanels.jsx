@@ -72,7 +72,7 @@ function resizeImageFile(file, maxSize = 1280) {
   });
 }
 
-function PhotoField({ label, value, onChange, required = false }) {
+export function PhotoField({ label, value, onChange, required = false }) {
   const inputRef = useRef(null);
 
   const handleFileChange = async (event) => {

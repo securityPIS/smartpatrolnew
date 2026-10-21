@@ -15,7 +15,7 @@ import {
 
 const DUPLICATE_TAP_WINDOW_MS = 2500;
 
-export function usePatrolNfcScan({ active, ship, ships, checkpoints, onCheckpointScanned }) {
+export function usePatrolNfcScan({ active, ship, ships, checkpoints, onCheckpointScanned, allowCompleted = false }) {
   const [support, setSupport] = useState({ supported: false, enabled: false, checked: false });
   const [scanState, setScanState] = useState('idle'); // idle | scanning | error
   const [notice, setNotice] = useState(null); // { tone: 'warning' | 'error', message }
@@ -24,7 +24,7 @@ export function usePatrolNfcScan({ active, ship, ships, checkpoints, onCheckpoin
   ));
   const latestRef = useRef({});
   const lastTapRef = useRef({ key: '', at: 0 });
-  latestRef.current = { ship, ships, checkpoints, onCheckpointScanned };
+  latestRef.current = { ship, ships, checkpoints, onCheckpointScanned, allowCompleted };
 
   useEffect(() => {
     let cancelled = false;
@@ -62,7 +62,7 @@ export function usePatrolNfcScan({ active, ship, ships, checkpoints, onCheckpoin
         if (tapKey === lastTapRef.current.key && now - lastTapRef.current.at < DUPLICATE_TAP_WINDOW_MS) return;
         lastTapRef.current = { key: tapKey, at: now };
 
-        const { ship: currentShip, ships: allShips, checkpoints: liveCheckpoints, onCheckpointScanned: onScanned } = latestRef.current;
+        const { ship: currentShip, ships: allShips, checkpoints: liveCheckpoints, onCheckpointScanned: onScanned, allowCompleted: canRescanCompleted } = latestRef.current;
         const definition = findCheckpointByNfcTag(currentShip?.customCheckpoints, tag);
         if (!definition) {
           const owner = findShipCheckpointByNfcTag(allShips, tag);
@@ -81,7 +81,7 @@ export function usePatrolNfcScan({ active, ship, ships, checkpoints, onCheckpoin
           setNotice({ tone: 'error', message: `Titik "${definition.name}" belum tersedia di daftar patroli shift ini.` });
           return;
         }
-        if (liveItem.status === 'completed') {
+        if (liveItem.status === 'completed' && !canRescanCompleted) {
           setNotice({ tone: 'warning', message: `Titik "${definition.name}" sudah dilaporkan shift ini.` });
           return;
         }

@@ -157,6 +157,33 @@ test('listener auth tidak mengubah gagal jaringan menjadi logout final', () => {
   );
 });
 
+test('restore sesi cold-start yang gagal transien tidak menjadi logout final', () => {
+  // supabase-js mengirim INITIAL_SESSION null bila getSession gagal (refresh token gagal
+  // jaringan / timeout lock). Event itu dulu dianggap logout -> "Sesi cloud berakhir".
+  assert.match(
+    authSource,
+    /if \(event === 'INITIAL_SESSION'\) return;/,
+    'listener harus mengabaikan INITIAL_SESSION; restore awal ditangani getSession yang membawa info error',
+  );
+  assert.match(
+    authSource,
+    /status >= 400 && status < 500[\s\S]*?return false;[\s\S]*?return true;/,
+    'hanya penolakan server 4xx yang definitif; gangguan jaringan/5xx/lock harus transien',
+  );
+  assert.match(
+    authSource,
+    /if \(isTransient\) scheduleRestoreRetry\(\);/,
+    'restore yang gagal transien harus diretry agar sesi pulih tanpa login ulang',
+  );
+  assert.match(
+    appContextSource,
+    /if \(activeUid\) setAuthAccessOfflineUid\(activeUid\);\s*else setIsAuthRestorePending\(true\);/,
+    'auth-null transien tanpa user aktif harus menandai restore pending',
+  );
+  const restoreGuards = appContextSource.match(/isAuthRestorePending\) return;/g) || [];
+  assert.equal(restoreGuards.length, 2, 'kedua validator reset sesi cloud harus menahan reset selama restore pending');
+});
+
 test('runtime auth mempertahankan sesi patroli saat auth-null offline', () => {
   assert.match(
     appContextSource,
@@ -165,8 +192,8 @@ test('runtime auth mempertahankan sesi patroli saat auth-null offline', () => {
   );
   assert.match(
     appContextSource,
-    /const offlineSessionUser = isOffline && sessionUserId && sessionUserRecord[\s\S]*?return offlineSessionUser;/,
-    'currentUserRecord harus tetap memakai sessionUserRecord saat offline dan auth cloud belum tersedia',
+    /const offlineSessionUser = \(isOffline \|\| isAuthRestorePending\) && sessionUserId && sessionUserRecord[\s\S]*?return offlineSessionUser;/,
+    'currentUserRecord harus tetap memakai sessionUserRecord saat offline / restore sesi masih diretry',
   );
   assert.match(
     appContextSource,

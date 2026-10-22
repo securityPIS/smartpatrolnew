@@ -4904,6 +4904,10 @@ export function AppProvider({ children }) {
   const [authAccessResolvedUid, setAuthAccessResolvedUid] = useState('');
   // Fallback offline: UID yang masih boleh akses lokal walau callable gagal.
   const [authAccessOfflineUid, setAuthAccessOfflineUid] = useState('');
+  // True saat restore sesi Supabase di cold start gagal TRANSIEN (jaringan/timeout lock)
+  // dan belum ada user aktif di memori. Validator tidak boleh logout selama status ini;
+  // auth.js meretry restore sampai sesi pulih atau server menolak definitif (4xx).
+  const [isAuthRestorePending, setIsAuthRestorePending] = useState(false);
   // Pemicu re-resolve akses. Dinaikkan saat resolusi gagal jaringan & koneksi pulih,
   // agar authAccessState (sumber shipAssigned/status) sembuh sendiri tanpa refresh manual.
   const [authAccessResolveNonce, setAuthAccessResolveNonce] = useState(0);
@@ -5075,7 +5079,9 @@ export function AppProvider({ children }) {
   const currentUserRecord = useMemo(() => {
     if (isFirebaseAuthEnabled) {
       if (!firebaseAuthReady) return null;
-      const offlineSessionUser = isOffline && sessionUserId && sessionUserRecord
+      // Record sesi lokal dipakai saat offline ATAU saat restore sesi Supabase masih
+      // diretry (gagal transien) — akses cloud tetap tertutup sampai sesi pulih.
+      const offlineSessionUser = (isOffline || isAuthRestorePending) && sessionUserId && sessionUserRecord
         ? sessionUserRecord
         : null;
       if (!firebaseAuthUser || !firebaseAuthEmail) return offlineSessionUser;
@@ -5120,7 +5126,7 @@ export function AppProvider({ children }) {
       firebaseAuthUid: sessionUserRecord?.firebaseUid || '',
       firebaseAuthEmail: sessionUserRecord?.email || '',
     }) || sessionUserRecord;
-  }, [authAccessEnabled, authAccessOfflineUid, authAccessResolvedUid, authAccessState, firebaseAuthEmail, firebaseAuthReady, firebaseAuthUid, firebaseAuthUser, isOffline, sessionUserId, sessionUserRecord, usersData]);
+  }, [authAccessEnabled, authAccessOfflineUid, authAccessResolvedUid, authAccessState, firebaseAuthEmail, firebaseAuthReady, firebaseAuthUid, firebaseAuthUser, isAuthRestorePending, isOffline, sessionUserId, sessionUserRecord, usersData]);
   const effectiveSessionUser = isFirebaseAuthEnabled
     ? currentUserRecord
     : (currentUserRecord || sessionUserRecord || null);
@@ -10488,12 +10494,14 @@ export function AppProvider({ children }) {
         // (authEvent.explicit) atau pencabutan akses server yang membersihkan sesi.
         const activeUid = sanitizeText(firebaseAuthUserRef.current?.uid || '', 160);
         if (activeUid) setAuthAccessOfflineUid(activeUid);
+        else setIsAuthRestorePending(true);
         setFirebaseAuthReady(true);
         setAuthAccessBusy(false);
         return;
       }
 
       const previousUid = sanitizeText(firebaseAuthUserRef.current?.uid || '', 160);
+      setIsAuthRestorePending(false);
       firebaseAuthUserRef.current = nextUser;
       setFirebaseAuthUser(nextUser);
       setFirebaseAuthReady(true);
@@ -10634,6 +10642,8 @@ export function AppProvider({ children }) {
   useEffect(() => {
     if (!isFirebaseAuthEnabled || !firebaseAuthReady) return;
     if (authBusy || authAccessBusy || firebaseAuthUser || !sessionUserId) return;
+    // Restore sesi masih diretry (gagal transien) — belum ada jawaban definitif.
+    if (isAuthRestorePending) return;
     if (isOffline) {
       const activeUser = usersData.find(user => user.id === sessionUserId) || null;
       const offlineUid = sanitizeText(activeUser?.firebaseUid || '', 160);
@@ -10657,7 +10667,7 @@ export function AppProvider({ children }) {
       usersCount: usersData.length,
     });
     resetAuthSession(message);
-  }, [authAccessBusy, authAccessResolvedUid, authAccessOfflineUid, authBusy, firebaseAuthReady, firebaseAuthUser, isOffline, resetAuthSession, sessionUserId, usersData]);
+  }, [authAccessBusy, authAccessResolvedUid, authAccessOfflineUid, authBusy, firebaseAuthReady, firebaseAuthUser, isAuthRestorePending, isOffline, resetAuthSession, sessionUserId, usersData]);
   useEffect(() => {
     if (!isAdmin || !hasOperationalCloudAccess) {
       setPendingRegistrations([]);
@@ -10738,6 +10748,7 @@ export function AppProvider({ children }) {
       // di-reset walau sesi Supabase masih sehat.
       if (!firebaseAuthReady || authBusy || authAccessBusy) return;
       if (!firebaseAuthUser || !authAccessEnabled) {
+        if (!firebaseAuthUser && isAuthRestorePending) return;
         if (isOffline) {
           const offlineUid = sanitizeText(activeUser?.firebaseUid || '', 160);
           if (offlineUid && authAccessOfflineUid !== offlineUid) {
@@ -10785,7 +10796,7 @@ export function AppProvider({ children }) {
     if (activeUser.role === ACCESS_ROLES.PETUGAS && !assignedShipForCurrentUser) {
       autoLogout('petugas-no-fleet', 'Petugas yang tidak lagi terdaftar di armada aktif tidak bisa tetap login.');
     }
-  }, [assignedShipForCurrentUser, authAccessBusy, authAccessEnabled, authAccessOfflineUid, authAccessResolvedUid, authAccessStatus, authBusy, currentUserRecord, firebaseAuthReady, firebaseAuthUser, handleLogout, isOffline, isWaitingForAssignedFleetSync, resetAuthSession, sessionUserId, shipsData, usersData]);
+  }, [assignedShipForCurrentUser, authAccessBusy, authAccessEnabled, authAccessOfflineUid, authAccessResolvedUid, authAccessStatus, authBusy, currentUserRecord, firebaseAuthReady, firebaseAuthUser, handleLogout, isAuthRestorePending, isOffline, isWaitingForAssignedFleetSync, resetAuthSession, sessionUserId, shipsData, usersData]);
   useEffect(() => { if (!currentUserRecord) return; if (!isAdmin && (currentPage === 'users' || currentPage === 'ships' || currentPage === 'daily-report')) { setCurrentPage('home'); setActiveShipId(null); setShowShipForm(false); setShowShipDocForm(false); setShowUserForm(false); setSelectedUser(null); } }, [currentPage, currentUserRecord, isAdmin]);
   useEffect(() => { if (activeShipId) return; setShowShipDocForm(false); }, [activeShipId]);
   useEffect(() => {

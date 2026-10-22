@@ -112,6 +112,16 @@ ketendang login saat menekan tombol "Sync Laporan" / submit patroli di jaringan 
 Pencabutan akun (disabled/rejected/restricted) tetap ditegakkan jalur `resolveOperationalAccess`
 → `handleLogout` saat benar-benar online, bukan oleh listener auth.
 
+Restore sesi cold-start: supabase-js mengirim `INITIAL_SESSION` dengan session `null` bila
+`getSession()` gagal (refresh token gagal karena jaringan/5xx, atau timeout lock antar-tab).
+Dulu event itu dianggap logout final → banner "Sesi cloud Anda telah berakhir" setiap kali app
+dibuka setelah access token kedaluwarsa di jaringan buruk. Sekarang listener mengabaikan
+`INITIAL_SESSION`; restore awal hanya lewat `getSession()` di `auth.js`, yang menganggap
+definitif HANYA penolakan server 4xx (refresh token dicabut/dipakai ulang, sesi hilang) dan
+meretry error transien (backoff 2s→30s, plus event `online`). Runtime menandai
+`isAuthRestorePending` sehingga kedua validator tidak me-reset sesi dan `currentUserRecord`
+memakai record sesi lokal; akses cloud tetap tertutup sampai sesi pulih.
+
 ## Important Files
 
 | Path | Peran |

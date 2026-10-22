@@ -2,8 +2,8 @@
 Tujuan: Menyediakan wrapper Supabase Auth kompatibel dengan flow auth SmartPatrol lama.
 Caller: AppContextRuntime, LoginPage, dan form admin yang butuh login/register/provision akun.
 Dependensi: Supabase Auth dan Edge Function provision-operational-user untuk pembuatan user oleh admin.
-Main Functions: Login/register email-password, provision user operasional, logout, subscribe auth state dengan guard offline, dan normalisasi error.
-Side Effects: Membuat/menghapus sesi Supabase Auth aktif, membaca sesi lokal, dan dapat memanggil Edge Function service-role terproteksi.
+Main Functions: Login/register email-password, provision user operasional, logout, subscribe auth state dengan guard offline + retry restore sesi awal yang gagal transien, dan normalisasi error.
+Side Effects: Membuat/menghapus sesi Supabase Auth aktif, membaca/merefresh sesi lokal (retry berbackoff + listener 'online'), dan dapat memanggil Edge Function service-role terproteksi.
 */
 
 import { ensureSupabaseClient, isSupabaseConfigured, normalizeSupabaseUser } from './app';
@@ -111,54 +111,97 @@ function isBrowserOffline() {
   return typeof navigator !== 'undefined' && navigator.onLine === false;
 }
 
+// Definitif hanya bila server menolak sesi (4xx: refresh token dicabut/kedaluwarsa/
+// sudah dipakai, sesi hilang). Gangguan jaringan, 5xx, timeout lock antar-tab, dan
+// error tak dikenal dianggap transien agar petugas tidak ketendang saat restore sesi.
 function isTransientAuthError(error) {
   if (isBrowserOffline()) return true;
-  const code = String(error?.code || error?.name || '').toLowerCase();
-  const message = String(error?.message || '').toLowerCase();
-  return (
-    code.includes('network')
-    || code.includes('fetch')
-    || message.includes('failed to fetch')
-    || message.includes('network')
-    || message.includes('fetch')
-  );
+  if (!error) return false;
+  if (error.name === 'AuthSessionMissingError') return false;
+  const status = Number(error.status || 0);
+  if (status >= 400 && status < 500 && status !== 408 && status !== 429) return false;
+  return true;
 }
+
+const RESTORE_RETRY_BASE_MS = 2000;
+const RESTORE_RETRY_MAX_MS = 30000;
 
 function subscribeToFirebaseAuthChanges(callback) {
   if (!isSupabaseConfigured) return () => {};
   const supabase = ensureSupabaseClient();
   let disposed = false;
+  let restorePending = false;
+  let restoreTimer = null;
+  let restoreAttempt = 0;
 
-  supabase.auth.getSession()
-    .then(({ data, error }) => {
-      if (disposed) return;
-      if (error) {
-        callback(null, {
-          event: 'INITIAL_SESSION_ERROR',
-          isTransient: isTransientAuthError(error),
-          error,
-        });
-        return;
-      }
-      const normalizedUser = normalizeSupabaseUser(data?.session?.user);
-      callback(normalizedUser, {
-        event: 'INITIAL_SESSION',
-        isTransient: !normalizedUser && isBrowserOffline(),
+  const clearRestoreTimer = () => {
+    if (restoreTimer) {
+      clearTimeout(restoreTimer);
+      restoreTimer = null;
+    }
+  };
+
+  // Retry restore sesi awal yang gagal transien. Saat offline tidak menjadwalkan timer
+  // (hemat baterai); event 'online' yang memicu percobaan berikutnya.
+  const scheduleRestoreRetry = () => {
+    if (disposed || restoreTimer || isBrowserOffline()) return;
+    const delay = Math.min(RESTORE_RETRY_BASE_MS * 2 ** restoreAttempt, RESTORE_RETRY_MAX_MS);
+    restoreAttempt += 1;
+    restoreTimer = setTimeout(() => {
+      restoreTimer = null;
+      restoreInitialSession();
+    }, delay);
+  };
+
+  const emitRestoreError = (error) => {
+    const isTransient = isTransientAuthError(error);
+    restorePending = isTransient;
+    callback(null, { event: 'INITIAL_SESSION_ERROR', isTransient, error });
+    if (isTransient) scheduleRestoreRetry();
+  };
+
+  function restoreInitialSession() {
+    supabase.auth.getSession()
+      .then(({ data, error }) => {
+        if (disposed) return;
+        if (error) {
+          emitRestoreError(error);
+          return;
+        }
+        const normalizedUser = normalizeSupabaseUser(data?.session?.user);
+        const isTransient = !normalizedUser && isBrowserOffline();
+        restorePending = isTransient;
+        if (!restorePending) restoreAttempt = 0;
+        callback(normalizedUser, { event: 'INITIAL_SESSION', isTransient });
+        if (isTransient) scheduleRestoreRetry();
+      })
+      .catch((error) => {
+        if (!disposed) emitRestoreError(error);
       });
-    })
-    .catch((error) => {
-      if (!disposed) {
-        callback(null, {
-          event: 'INITIAL_SESSION_ERROR',
-          isTransient: isTransientAuthError(error),
-          error,
-        });
-      }
-    });
+  }
+
+  const handleOnline = () => {
+    if (!restorePending || disposed) return;
+    clearRestoreTimer();
+    restoreInitialSession();
+  };
+  if (typeof window !== 'undefined') window.addEventListener('online', handleOnline);
+
+  restoreInitialSession();
 
   const { data } = supabase.auth.onAuthStateChange((event, session) => {
     if (disposed) return;
+    // INITIAL_SESSION sudah ditangani restoreInitialSession (yang membawa info error).
+    // supabase-js mengirim INITIAL_SESSION null bila getSession gagal karena jaringan/
+    // timeout lock, sehingga event ini tidak boleh dianggap logout definitif.
+    if (event === 'INITIAL_SESSION') return;
     const normalizedUser = normalizeSupabaseUser(session?.user);
+    if (normalizedUser && restorePending) {
+      // Auto-refresh supabase-js berhasil memulihkan sesi; hentikan retry manual.
+      restorePending = false;
+      restoreAttempt = 0;
+      clearRestoreTimer();
+    }
     const isExplicitLogout = event === 'SIGNED_OUT' && explicitFirebaseLogout;
     callback(normalizedUser, {
       event,
@@ -174,6 +217,8 @@ function subscribeToFirebaseAuthChanges(callback) {
 
   return () => {
     disposed = true;
+    clearRestoreTimer();
+    if (typeof window !== 'undefined') window.removeEventListener('online', handleOnline);
     data?.subscription?.unsubscribe?.();
   };
 }

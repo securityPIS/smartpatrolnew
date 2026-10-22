@@ -31,6 +31,7 @@ import AsyncImage from '../components/AsyncImage';
 import HistoryDetailView from '../components/views/HistoryDetailView';
 import ShiftStatusModal from '../components/modals/ShiftStatusModal';
 import ShiftAttendanceModal from '../components/modals/ShiftAttendanceModal';
+import AttendanceDetailModal, { getAttendanceStatusView, getAttendanceToneTextClass } from '../components/modals/AttendanceDetailModal';
 
 function ensureArray(value) {
   return Array.isArray(value) ? value : [];
@@ -180,6 +181,7 @@ const PatrolPage = React.memo(function PatrolPage() {
   const { selectedHistoryEntry, closeHistoryEntry } = useHistory();
   const { selectedIncident, setSelectedIncident, allIncidents, incidentMeta, handleAddProgress } = useIncidents();
   const [temuanUpdateTarget, setTemuanUpdateTarget] = React.useState(null);
+  const [attendanceDetailGuard, setAttendanceDetailGuard] = React.useState(null);
   const trustedTime = React.useSyncExternalStore(
     subscribeTrustedTime,
     getTrustedTimeSnapshot,
@@ -527,39 +529,39 @@ const PatrolPage = React.memo(function PatrolPage() {
   const displayShiftTime = isHistoryMode ? selectedHistoryEntry?.time : currentShiftMeta?.timeRange;
   const displayWeather = isHistoryMode ? selectedHistoryEntry?.weatherSnapshot : weatherInfo;
   const displayWeatherLoading = isHistoryMode ? false : weatherLoading;
-  const displayCrew = React.useMemo(() => (
-    isHistoryMode
-      ? ensureArray(selectedHistoryEntry?.crewSnapshot).filter(user => user?.role === ACCESS_ROLES.PETUGAS)
-      : ensureArray(activeShiftGuardSnapshot)
-  ), [activeShiftGuardSnapshot, isHistoryMode, selectedHistoryEntry?.crewSnapshot]);
-  // Mode demo: ringkasan absensi shift berjalan sebagai SATU badge di tab Info (Petugas Jaga).
+  // Mode demo (shift berjalan): absensi per petugas dari record status shift.
+  const isLiveAttendance = isDemoMode && !isHistoryMode;
+  const attendanceItems = React.useMemo(
+    () => (isLiveAttendance ? ensureArray(currentShiftStatusRecord?.items) : []),
+    [currentShiftStatusRecord, isLiveAttendance],
+  );
+  const getAttendanceItemForGuard = React.useCallback((guard) => (
+    attendanceItems.find(item => item?.userId && item.userId === guard?.id)
+      || attendanceItems.find(item => !item?.userId && item?.name && item.name === guard?.name)
+      || null
+  ), [attendanceItems]);
+  const displayCrew = React.useMemo(() => {
+    if (isHistoryMode) return ensureArray(selectedHistoryEntry?.crewSnapshot).filter(user => user?.role === ACCESS_ROLES.PETUGAS);
+    const crew = ensureArray(activeShiftGuardSnapshot);
+    if (!isLiveAttendance) return crew;
+    // Label di bawah nama: "Istirahat - Kondisi Baik/Tidak Baik" atau "Patroli - Kondisi Baik".
+    return crew.map((guard) => {
+      const statusView = getAttendanceStatusView(getAttendanceItemForGuard(guard));
+      return { ...guard, crewStatusText: statusView.label, crewStatusClass: getAttendanceToneTextClass(statusView.tone) };
+    });
+  }, [activeShiftGuardSnapshot, getAttendanceItemForGuard, isHistoryMode, isLiveAttendance, selectedHistoryEntry?.crewSnapshot]);
+  // Mode demo: badge di tab Info (Petugas Jaga) hanya jumlah petugas yang sudah absen.
   const attendanceBadge = React.useMemo(() => {
-    if (!isDemoMode || isHistoryMode) return null;
-    const items = ensureArray(currentShiftStatusRecord?.items);
-    const attended = items.filter(item => item.attendancePhotoUrl);
-    if (!attended.length) {
-      return <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded border border-amber-500/50 bg-amber-500/10 text-amber-300">Belum absensi</span>;
-    }
-    const notWell = attended.filter(item => item.condition === 'tidak_baik');
-    const resting = attended.filter(item => item.status === 'istirahat').length;
-    // Kondisi hanya relevan untuk petugas istirahat; DCU (suhu & tensi) hanya ada di shift pagi.
-    const describeItem = (item) => {
-      const statusText = item.status === 'istirahat'
-        ? `Istirahat, ${item.condition === 'tidak_baik' ? `Tidak Baik (${item.conditionNote || '-'})` : 'Baik'}`
-        : 'Patroli';
-      const dcuText = item.dcu ? ` · DCU ${item.dcu.temperature ?? '-'}°C, TD ${item.dcu.systolic ?? '-'}/${item.dcu.diastolic ?? '-'}` : '';
-      return `${item.name}: ${statusText}${dcuText}`;
-    };
-    const detail = attended.map(describeItem).join('\n');
+    if (!isLiveAttendance) return null;
+    const crew = ensureArray(activeShiftGuardSnapshot);
+    const attendedCount = crew.filter(guard => getAttendanceItemForGuard(guard)?.attendancePhotoUrl).length;
+    const isAllAttended = crew.length > 0 && attendedCount === crew.length;
     return (
-      <span
-        title={detail}
-        className={`text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded border ${notWell.length ? 'border-rose-500/50 bg-rose-500/10 text-rose-300' : 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300'}`}
-      >
-        Absensi {attended.length}/{items.length} · {resting} istirahat{notWell.length ? ` · ${notWell.length} tidak baik` : resting ? ' · kondisi baik' : ''}
+      <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded border ${isAllAttended ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/50 bg-amber-500/10 text-amber-300'}`}>
+        Absensi {attendedCount}/{crew.length}
       </span>
     );
-  }, [currentShiftStatusRecord, isHistoryMode]);
+  }, [activeShiftGuardSnapshot, getAttendanceItemForGuard, isLiveAttendance]);
 
   const infoEntryData = React.useMemo(() => (
     isHistoryMode
@@ -723,6 +725,7 @@ const PatrolPage = React.memo(function PatrolPage() {
       isInline={true}
       entryData={infoEntryData}
       crewBadge={attendanceBadge}
+      onCrewClick={isLiveAttendance ? setAttendanceDetailGuard : null}
       onSummaryCardClick={handleOpenSummaryDetail}
       customTimeBadge={
         <div className="flex flex-wrap items-center gap-2 bg-[#0b1229] border border-cyan-800/50 rounded-2xl p-4 shadow-sm">
@@ -754,6 +757,14 @@ const PatrolPage = React.memo(function PatrolPage() {
     <div className="flex h-full overflow-hidden">
       {/* Mode demo: status shift diganti absensi petugas (foto, status, kondisi). */}
       {showShiftStatusModal && (isDemoMode ? <ShiftAttendanceModal /> : <ShiftStatusModal />)}
+      {attendanceDetailGuard && isLiveAttendance && (
+        <AttendanceDetailModal
+          guard={attendanceDetailGuard}
+          item={getAttendanceItemForGuard(attendanceDetailGuard)}
+          shiftLabel={`${currentShiftMeta?.label || 'Shift aktif'}${currentShiftMeta?.timeRange ? ` (${currentShiftMeta.timeRange})` : ''}`}
+          onClose={() => setAttendanceDetailGuard(null)}
+        />
+      )}
 
       {/* Left Pane: List and Search */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 animate-in fade-in flex flex-col min-h-full scrollbar-thin scrollbar-thumb-cyan-900/50">

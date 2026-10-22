@@ -82,7 +82,7 @@ function getLatestCompletedCheckpoint(checkpoints = []) {
   }, null);
 }
 
-export default function HistoryDetailView({ isInline = false, entryData = null, onSummaryCardClick = null, hideTimeAudit = false, customTimeBadge = null, crewBadge = null }) {
+export default function HistoryDetailView({ isInline = false, entryData = null, onSummaryCardClick = null, hideTimeAudit = false, customTimeBadge = null, crewBadge = null, onCrewClick = null }) {
   const { selectedHistoryEntry } = useHistory();
   const { operationalShip, operationalShipName } = useShips();
   const { weatherInfo, weatherLoading, getWeatherDetail } = useWeather();
@@ -304,22 +304,39 @@ export default function HistoryDetailView({ isInline = false, entryData = null, 
             </p>
           )}
           {displayCrew.map((user) => {
+            // Mode demo: kartu petugas bisa diklik → popup hasil absensi; label status dari absensi.
+            const isCrewClickable = typeof onCrewClick === 'function';
+            const statusText = user.crewStatusText || `${user.role}${user.shiftStatusLabel ? ` - ${user.shiftStatusLabel}` : ''}`;
+            const statusClass = user.crewStatusClass || (
+              user.shiftStatus === 'istirahat'
+                ? 'text-amber-300'
+                : user.shiftStatus === 'patroli'
+                  ? 'text-emerald-300'
+                  : 'text-cyan-500'
+            );
             return (
-              <div key={user.id} className="bg-[#0b1229] rounded-2xl p-3 border border-cyan-800/50 flex items-center justify-between shadow-sm">
+              <div
+                key={user.id}
+                role={isCrewClickable ? 'button' : undefined}
+                tabIndex={isCrewClickable ? 0 : undefined}
+                aria-label={isCrewClickable ? `Lihat hasil absensi ${user.name}` : undefined}
+                onClick={isCrewClickable ? () => onCrewClick(user) : undefined}
+                onKeyDown={isCrewClickable ? (event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    onCrewClick(user);
+                  }
+                } : undefined}
+                className={`bg-[#0b1229] rounded-2xl p-3 border border-cyan-800/50 flex items-center justify-between shadow-sm ${isCrewClickable ? 'cursor-pointer hover:border-cyan-500/60 transition-colors' : ''}`}
+              >
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-[#070b19] border border-cyan-700/50 overflow-hidden shrink-0">
                     {user.photoUrl ? <AsyncImage src={user.photoUrl} alt={user.name} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyan-500"><User className="w-5 h-5" /></div>}
                   </div>
                   <div>
                     <p className="text-sm font-bold text-cyan-50">{user.name}</p>
-                    <p className={`text-[10px] uppercase font-bold tracking-tight ${
-                      user.shiftStatus === 'istirahat'
-                        ? 'text-amber-300'
-                        : user.shiftStatus === 'patroli'
-                          ? 'text-emerald-300'
-                          : 'text-cyan-500'
-                    }`}>
-                      {user.role}{user.shiftStatusLabel ? ` - ${user.shiftStatusLabel}` : ''}
+                    <p className={`text-[10px] uppercase font-bold tracking-tight ${statusClass}`}>
+                      {statusText}
                     </p>
                   </div>
                 </div>

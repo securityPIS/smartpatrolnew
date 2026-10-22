@@ -2,7 +2,7 @@
 Tujuan: Absensi petugas shift (mode demo) — pengganti Status Shift. Setiap pergantian shift tiap
         petugas wajib absen di HP masing-masing: foto (wajib), Patroli/Istirahat. Kondisi Baik/Tidak
         Baik hanya diisi bila memilih Istirahat (Tidak Baik wajib keterangan). Khusus Shift 1 (pagi)
-        ada Daily Check Up (DCU): suhu + tekanan darah, masing-masing wajib foto evidence.
+        ada Daily Check Up (DCU): suhu + tekanan darah (dropdown), masing-masing wajib foto evidence.
         Checklist terkunci sampai petugas yang login sudah absen.
 Caller: PatrolPage saat isDemoMode (modal status shift).
 Dependensi: Patrol context (handleSaveCurrentShiftStatus, currentShiftMeta), ModalShell, PhotoField.
@@ -19,12 +19,21 @@ import { PhotoField } from '../incidentFollowUp/FollowUpPanels';
 // DCU hanya untuk shift pagi (Shift 1 06:00-12:00, termasuk id kompat/legacy).
 const DCU_SHIFT_IDS = new Set(['shift-1-active', 'shift-1', 'shift-pagi']);
 
-// Batas wajar input DCU agar salah ketik (mis. 365 untuk 36.5) tertolak.
+// Rentang pilihan dropdown DCU (sekaligus batas validasi nilai lama/tersimpan).
 const DCU_LIMITS = {
-  temperature: { min: 34, max: 43 },
-  systolic: { min: 60, max: 250 },
-  diastolic: { min: 30, max: 150 },
+  temperature: { min: 35, max: 42 },
+  systolic: { min: 70, max: 220 },
+  diastolic: { min: 40, max: 140 },
 };
+
+function buildRangeOptions({ min, max }, step, decimals = 0) {
+  const count = Math.round((max - min) / step);
+  return Array.from({ length: count + 1 }, (_, index) => (min + index * step).toFixed(decimals));
+}
+
+const TEMPERATURE_OPTIONS = buildRangeOptions(DCU_LIMITS.temperature, 0.1, 1);
+const SYSTOLIC_OPTIONS = buildRangeOptions(DCU_LIMITS.systolic, 1);
+const DIASTOLIC_OPTIONS = buildRangeOptions(DCU_LIMITS.diastolic, 1);
 
 export function isDcuShiftMeta(shiftMeta) {
   return DCU_SHIFT_IDS.has(shiftMeta?.id);
@@ -57,12 +66,18 @@ export function isDcuComplete(dcu) {
     && Boolean(dcu?.temperaturePhotoUrl) && Boolean(dcu?.bloodPressurePhotoUrl);
 }
 
+// Nilai dropdown berupa string ("36.5"); suhu lama (mis. 37) diseragamkan ke 1 desimal.
+function toOptionValue(value, decimals = 0) {
+  const parsed = parseDcuNumber(value);
+  return value === '' || value === null || value === undefined || parsed === null ? '' : parsed.toFixed(decimals);
+}
+
 function buildDcuDraft(existingDcu) {
   return {
-    temperature: existingDcu?.temperature ?? '',
+    temperature: toOptionValue(existingDcu?.temperature, 1),
     temperaturePhotoUrl: existingDcu?.temperaturePhotoUrl || null,
-    systolic: existingDcu?.systolic ?? '',
-    diastolic: existingDcu?.diastolic ?? '',
+    systolic: toOptionValue(existingDcu?.systolic),
+    diastolic: toOptionValue(existingDcu?.diastolic),
     bloodPressurePhotoUrl: existingDcu?.bloodPressurePhotoUrl || null,
   };
 }
@@ -110,7 +125,7 @@ function buildSaveItem(draft, requireDcu) {
 
 const OPTION_BASE = 'rounded-2xl border px-3 py-2.5 transition flex items-center justify-center gap-2';
 const FIELD_LABEL = 'text-[10px] font-mono text-cyan-500 uppercase tracking-widest font-bold mb-2 ml-1 block';
-const NUMBER_INPUT = 'w-full rounded-2xl border bg-slate-950 p-3 text-sm text-slate-100 outline-none';
+const SELECT_INPUT = 'w-full rounded-2xl border bg-slate-950 p-3 text-sm text-slate-100 outline-none';
 
 function ChoiceButton({ active, activeClass, onClick, icon: Icon, label }) {
   return (
@@ -121,24 +136,23 @@ function ChoiceButton({ active, activeClass, onClick, icon: Icon, label }) {
   );
 }
 
-function DcuNumberInput({ id, value, onChange, placeholder, invalid }) {
+function DcuSelect({ id, value, onChange, options, placeholder, unit, invalid, ariaLabel }) {
   return (
-    <input
+    <select
       id={id}
-      type="number"
-      inputMode="decimal"
-      step="any"
       value={value}
       onChange={(event) => onChange(event.target.value)}
-      placeholder={placeholder}
-      className={`${NUMBER_INPUT} ${invalid ? 'border-rose-500/50 focus:border-rose-400' : 'border-slate-700 focus:border-cyan-400'}`}
-    />
+      aria-label={ariaLabel}
+      className={`${SELECT_INPUT} ${value ? '' : 'text-slate-500'} ${invalid ? 'border-rose-500/50 focus:border-rose-400' : 'border-slate-700 focus:border-cyan-400'}`}
+    >
+      <option value="">{placeholder}</option>
+      {options.map((option) => <option key={option} value={option}>{option}{unit ? ` ${unit}` : ''}</option>)}
+    </select>
   );
 }
 
 function DcuSection({ dcu, onChange }) {
   const issues = getDcuIssues(dcu);
-  const showTemperatureError = dcu.temperature !== '' && issues.temperature;
   const showBloodPressureError = dcu.systolic !== '' && dcu.diastolic !== '' && issues.bloodPressure;
 
   return (
@@ -152,8 +166,7 @@ function DcuSection({ dcu, onChange }) {
         <label htmlFor="dcu-temperature" className={FIELD_LABEL}>
           <Thermometer className="mr-1 inline h-3 w-3" />Suhu tubuh (°C) <span className="text-rose-400">*</span>
         </label>
-        <DcuNumberInput id="dcu-temperature" value={dcu.temperature} onChange={(temperature) => onChange({ temperature })} placeholder="Contoh: 36.5" invalid={showTemperatureError} />
-        {showTemperatureError && <p className="ml-1 text-[11px] text-rose-300">Suhu harus {DCU_LIMITS.temperature.min}–{DCU_LIMITS.temperature.max} °C.</p>}
+        <DcuSelect id="dcu-temperature" value={dcu.temperature} onChange={(temperature) => onChange({ temperature })} options={TEMPERATURE_OPTIONS} unit="°C" placeholder="Pilih suhu" />
         <PhotoField label="Foto Evidence Suhu" required value={dcu.temperaturePhotoUrl} onChange={(temperaturePhotoUrl) => onChange({ temperaturePhotoUrl })} />
       </div>
 
@@ -162,9 +175,9 @@ function DcuSection({ dcu, onChange }) {
           <HeartPulse className="mr-1 inline h-3 w-3" />Tekanan darah (mmHg) <span className="text-rose-400">*</span>
         </p>
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-          <DcuNumberInput id="dcu-systolic" value={dcu.systolic} onChange={(systolic) => onChange({ systolic })} placeholder="Sistolik 120" invalid={showBloodPressureError} />
+          <DcuSelect id="dcu-systolic" value={dcu.systolic} onChange={(systolic) => onChange({ systolic })} options={SYSTOLIC_OPTIONS} placeholder="Sistolik" ariaLabel="Tekanan darah sistolik" invalid={showBloodPressureError} />
           <span className="text-lg font-bold text-slate-500">/</span>
-          <DcuNumberInput id="dcu-diastolic" value={dcu.diastolic} onChange={(diastolic) => onChange({ diastolic })} placeholder="Diastolik 80" invalid={showBloodPressureError} />
+          <DcuSelect id="dcu-diastolic" value={dcu.diastolic} onChange={(diastolic) => onChange({ diastolic })} options={DIASTOLIC_OPTIONS} placeholder="Diastolik" ariaLabel="Tekanan darah diastolik" invalid={showBloodPressureError} />
         </div>
         {showBloodPressureError && <p className="ml-1 text-[11px] text-rose-300">Tekanan darah tidak wajar (sistolik harus lebih besar dari diastolik).</p>}
         <PhotoField label="Foto Evidence Tekanan Darah" required value={dcu.bloodPressurePhotoUrl} onChange={(bloodPressurePhotoUrl) => onChange({ bloodPressurePhotoUrl })} />

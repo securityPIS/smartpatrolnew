@@ -1287,6 +1287,23 @@ function normalizeShiftGuardStatusValue(value) {
     : SHIFT_GUARD_STATUS.PATROLI;
 }
 
+// DCU (Daily Check Up) shift pagi: angka dibulatkan 1 desimal, foto evidence disanitasi.
+function normalizeShiftStatusDcu(dcu) {
+  if (!dcu || typeof dcu !== 'object') return null;
+  const toMeasurement = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 && parsed < 1000 ? Math.round(parsed * 10) / 10 : null;
+  };
+  const normalizedDcu = {
+    temperature: toMeasurement(dcu.temperature),
+    temperaturePhotoUrl: sanitizeUrl(dcu.temperaturePhotoUrl || '') || null,
+    systolic: toMeasurement(dcu.systolic),
+    diastolic: toMeasurement(dcu.diastolic),
+    bloodPressurePhotoUrl: sanitizeUrl(dcu.bloodPressurePhotoUrl || '') || null,
+  };
+  return Object.values(normalizedDcu).some(value => value !== null) ? normalizedDcu : null;
+}
+
 function normalizeShiftStatusItems(items = []) {
   const seenItemKeys = new Set();
 
@@ -1299,14 +1316,19 @@ function normalizeShiftStatusItems(items = []) {
     seenItemKeys.add(itemKey);
     // Absensi (mode demo): foto & kondisi petugas ikut disimpan bila ada.
     const attendancePhotoUrl = sanitizeUrl(item?.attendancePhotoUrl || '') || null;
-    const condition = item?.condition === 'tidak_baik' ? 'tidak_baik' : item?.condition === 'baik' ? 'baik' : null;
+    const status = normalizeShiftGuardStatusValue(item?.status);
+    const rawCondition = item?.condition === 'tidak_baik' ? 'tidak_baik' : item?.condition === 'baik' ? 'baik' : null;
+    // Khusus demo: kondisi hanya untuk petugas istirahat & DCU shift pagi. Production tidak berubah.
+    const condition = isDemoMode && status !== SHIFT_GUARD_STATUS.ISTIRAHAT ? null : rawCondition;
+    const dcu = isDemoMode ? normalizeShiftStatusDcu(item?.dcu) : null;
     normalizedItems.push({
       userId: userId || null,
       name,
       role: ACCESS_ROLES.PETUGAS,
-      status: normalizeShiftGuardStatusValue(item?.status),
+      status,
       ...(attendancePhotoUrl ? { attendancePhotoUrl } : {}),
       ...(condition ? { condition, conditionNote: sanitizeMultilineText(item?.conditionNote || '', 200) } : {}),
+      ...(dcu ? { dcu } : {}),
     });
 
     return normalizedItems;
@@ -7984,6 +8006,7 @@ export function AppProvider({ children }) {
         attendancePhotoUrl: matchedItem?.attendancePhotoUrl || null,
         condition: matchedItem?.condition || null,
         conditionNote: matchedItem?.conditionNote || '',
+        dcu: matchedItem?.dcu || null,
       };
     });
 

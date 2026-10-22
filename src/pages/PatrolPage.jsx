@@ -533,15 +533,21 @@ const PatrolPage = React.memo(function PatrolPage() {
     }
     const notWell = attended.filter(item => item.condition === 'tidak_baik');
     const resting = attended.filter(item => item.status === 'istirahat').length;
-    const detail = attended
-      .map(item => `${item.name}: ${item.status === 'istirahat' ? 'Istirahat' : 'Patroli'}, ${item.condition === 'tidak_baik' ? `Tidak Baik (${item.conditionNote || '-'})` : 'Baik'}`)
-      .join('\n');
+    // Kondisi hanya relevan untuk petugas istirahat; DCU (suhu & tensi) hanya ada di shift pagi.
+    const describeItem = (item) => {
+      const statusText = item.status === 'istirahat'
+        ? `Istirahat, ${item.condition === 'tidak_baik' ? `Tidak Baik (${item.conditionNote || '-'})` : 'Baik'}`
+        : 'Patroli';
+      const dcuText = item.dcu ? ` · DCU ${item.dcu.temperature ?? '-'}°C, TD ${item.dcu.systolic ?? '-'}/${item.dcu.diastolic ?? '-'}` : '';
+      return `${item.name}: ${statusText}${dcuText}`;
+    };
+    const detail = attended.map(describeItem).join('\n');
     return (
       <span
         title={detail}
         className={`text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded border ${notWell.length ? 'border-rose-500/50 bg-rose-500/10 text-rose-300' : 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300'}`}
       >
-        Absensi {attended.length}/{items.length} · {resting} istirahat{notWell.length ? ` · ${notWell.length} tidak baik` : ' · kondisi baik'}
+        Absensi {attended.length}/{items.length} · {resting} istirahat{notWell.length ? ` · ${notWell.length} tidak baik` : resting ? ' · kondisi baik' : ''}
       </span>
     );
   }, [currentShiftStatusRecord, isHistoryMode]);

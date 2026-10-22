@@ -70,7 +70,10 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
   temuan dgn shiftKey shift ini, progress dalam rentang jam shift).
 - Demo: "Status Shift" diganti ABSENSI (`ShiftAttendanceModal`): tiap pergantian shift setiap petugas absen
   SENDIRI di HP masing-masing (form hanya untuk user login, tanpa kartu info) — foto (capture user),
-  Patroli/Istirahat, kondisi Baik/Tidak Baik (+keterangan wajib bila Tidak Baik). Simpan = item rekan di
+  Patroli/Istirahat, kondisi Baik/Tidak Baik HANYA bila Istirahat (+keterangan wajib bila Tidak Baik; dibuang
+  saat Patroli). Shift 1/pagi (`isDcuShiftMeta`: shift-1-active/shift-1/shift-pagi) wajib Daily Check Up
+  (DCU): suhu °C + tekanan darah sistolik/diastolik, masing-masing wajib foto evidence → item `dcu`
+  (`normalizeShiftStatusDcu`, hanya saat `isDemoMode`). Simpan = item rekan di
   record dipertahankan + item sendiri diganti (`handleSaveCurrentShiftStatus`). Gerbang checklist demo:
   `isCurrentShiftStatusCompleted` = petugas login punya item ber-`attendancePhotoUrl` di shift ini. Go live tetap `ShiftStatusModal`. Hasil absensi = SATU badge di tab Info (sebelah judul
   "Petugas Jaga", prop `crewBadge` HistoryDetailView): "Absensi x/y · n istirahat · n tidak baik".

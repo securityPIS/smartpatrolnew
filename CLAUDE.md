@@ -66,8 +66,9 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
   (titik jadi TEMUAN, laporan lama di `previousReports`). Titik TEMUAN → temuan baru tambahan masuk
   `incidentsData` (createPatrolIncidentRecord) tanpa menimpa laporan pertama. UPDATE TEMUAN →
   `PatrolTemuanUpdateModal`: WAJIB isi update untuk SEMUA temuan open di titik → `handleAddProgress(id,
-  { comment, photoUrl })`. Flag: "Temuan Open · x temuan baru & y update temuan" (hitungan shift berjalan:
-  temuan dgn shiftKey shift ini, progress dalam rentang jam shift).
+  { comment, photoUrl })`. Flag (demo & go live): "x temuan open" selalu; tambah "· y temuan baru" /
+  "· z update temuan" hanya bila > 0 di shift berjalan (temuan dgn shiftKey shift ini, progress dalam
+  rentang jam shift) → keterangan itu reset tiap ganti shift; temuan baru ikut menambah x (masih open).
 - Demo: "Status Shift" diganti ABSENSI (`ShiftAttendanceModal`): tiap pergantian shift setiap petugas absen
   SENDIRI di HP masing-masing (form hanya untuk user login, tanpa kartu info) — foto (capture user),
   Patroli/Istirahat, kondisi Baik/Tidak Baik HANYA bila Istirahat (+keterangan wajib bila Tidak Baik; dibuang

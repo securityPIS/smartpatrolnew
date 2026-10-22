@@ -238,12 +238,14 @@ const PatrolPage = React.memo(function PatrolPage() {
     });
     return collection;
   }, [allIncidents, incidentMeta, isHistoryMode, followUpStoreVersion]);
-  // Mode demo: jumlah temuan baru & update temuan per titik pada shift berjalan (untuk flag titik).
+  // Jumlah temuan baru & update temuan per titik pada shift berjalan (untuk flag titik). Hanya
+  // dihitung dalam shift berjalan → otomatis reset tiap pergantian shift.
   const shiftActivityByCheckpointKey = React.useMemo(() => {
     const collection = new Map();
-    if (isHistoryMode || !isDemoMode) return collection;
-    const shiftStartMs = currentShiftSchedule?.startAt?.getTime?.() ?? 0;
-    const shiftEndMs = currentShiftSchedule?.endAt?.getTime?.() ?? Number.MAX_SAFE_INTEGER;
+    if (isHistoryMode) return collection;
+    const shiftStartMs = new Date(currentShiftSchedule?.startAt || '').getTime();
+    const shiftEndMs = new Date(currentShiftSchedule?.endAt || '').getTime();
+    const hasShiftRange = Number.isFinite(shiftStartMs) && Number.isFinite(shiftEndMs);
     ensureArray(allIncidents).forEach((incident) => {
       if (!incident?.isPatrol || incident.isSOS) return;
       const key = getIncidentCheckpointKey(incident);
@@ -252,7 +254,7 @@ const PatrolPage = React.memo(function PatrolPage() {
       if (incident.shiftKey && incident.shiftKey === currentShiftMeta?.key) activity.newCount += 1;
       ensureArray(incidentMeta?.[incident.id]?.progress).forEach((progress) => {
         const createdMs = new Date(progress?.createdAt || '').getTime();
-        if (Number.isFinite(createdMs) && createdMs >= shiftStartMs && createdMs < shiftEndMs) activity.updateCount += 1;
+        if (hasShiftRange && Number.isFinite(createdMs) && createdMs >= shiftStartMs && createdMs < shiftEndMs) activity.updateCount += 1;
       });
       collection.set(key, activity);
     });
@@ -395,12 +397,19 @@ const PatrolPage = React.memo(function PatrolPage() {
     setNfcSelection({ item, definition, verified: false, simulated: true });
   };
 
-  // Flag temuan open; mode demo menambah jumlah temuan baru & update temuan pada shift berjalan.
+  // Flag temuan open: "x temuan open" selalu tampil (temuan baru ikut terhitung di sini karena
+  // masih open); keterangan temuan baru / update temuan hanya bila ada di shift berjalan.
   const renderTemuanOpenFlag = (temuanState) => {
-    if (!temuanState.openTemuan.length) return null;
+    const openCount = temuanState.openTemuan.length;
+    if (!openCount) return null;
+    const label = [
+      `${openCount} temuan open`,
+      temuanState.newCount > 0 ? `${temuanState.newCount} temuan baru` : '',
+      temuanState.updateCount > 0 ? `${temuanState.updateCount} update temuan` : '',
+    ].filter(Boolean).join(' · ');
     return (
       <span className="text-[9px] uppercase tracking-widest text-yellow-300 border border-yellow-500/40 px-1.5 py-0.5 rounded" title="Masih ada temuan yang belum Closed/Unsolve">
-        Temuan Open{isDemoMode ? ` · ${temuanState.newCount} temuan baru & ${temuanState.updateCount} update temuan` : ''}
+        {label}
       </span>
     );
   };

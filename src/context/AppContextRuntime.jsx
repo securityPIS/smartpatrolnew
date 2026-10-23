@@ -35,6 +35,8 @@ import {
   getMonthKey,
   normalizePersonnelMonthlyPlan,
   releaseFromMonthPlan,
+  replaceMonthPlan,
+  SCHEDULE_DEMO_INHERIT_MONTHS,
   validateSchedulePeriod,
 } from '../utils/personnelSchedule';
 import { applyPersonnelMonthlyPlanOnServer } from '../services/backend/personnelPlan';
@@ -116,6 +118,8 @@ const ACCESS_ROLES = {
 };
 
 const ACCESS_ROLE_VALUES = Object.values(ACCESS_ROLES);
+// Mode demo: rencana penugasan hanya disalin otomatis ke bulan berjalan +1 (lihat personnelSchedule).
+const SCHEDULE_INHERIT_MONTHS_AHEAD = isDemoMode ? SCHEDULE_DEMO_INHERIT_MONTHS : undefined;
 const AUTH_SESSION_KEY = 'smartpatrol.auth.local.v1';
 const APP_TIME_ZONE = 'Asia/Jakarta';
 const APP_TIME_ZONE_UTC_OFFSET_HOURS = 7;
@@ -8721,6 +8725,7 @@ export function AppProvider({ children }) {
         endDate: safeEnd,
         currentMonth,
         validUserIds: new Set(usersData.map((user) => user.id)),
+        inheritMonthsAhead: SCHEDULE_INHERIT_MONTHS_AHEAD,
         mutationMeta,
       }));
       requestCloudSync('urgent');
@@ -8763,6 +8768,7 @@ export function AppProvider({ children }) {
         monthKey,
         currentMonth,
         validUserIds: new Set(usersData.map((user) => user.id)),
+        inheritMonthsAhead: SCHEDULE_INHERIT_MONTHS_AHEAD,
         mutationMeta,
       }));
       requestCloudSync('urgent');
@@ -8784,6 +8790,26 @@ export function AppProvider({ children }) {
     });
     return { ok: true };
   }, [getScheduleClock, isAdmin, requestCloudSync, shipsData, syncManagedUserOperationalAccess, updateUserRecordLocally, usersData]);
+
+  // Clear all (entriesByShip kosong) / urungkan (snapshot roster) untuk satu bulan perencanaan.
+  // Bulan berjalan & bulan lalu ditolak: penugasan operasional diubah per petugas saja.
+  const handleScheduleReplaceMonth = useCallback(async ({ monthKey, entriesByShip = {} } = {}) => {
+    if (!isAdmin) return { ok: false, error: 'Hanya admin yang dapat mengatur jadwal penugasan.' };
+    const { currentMonth } = getScheduleClock();
+    if (diffMonths(currentMonth, monthKey) <= 0) {
+      return { ok: false, error: 'Clear all hanya untuk bulan perencanaan (setelah bulan berjalan).' };
+    }
+    setShipsData(replaceMonthPlan(shipsData, {
+      monthKey,
+      currentMonth,
+      entriesByShip,
+      validUserIds: new Set(usersData.map((user) => user.id)),
+      inheritMonthsAhead: SCHEDULE_INHERIT_MONTHS_AHEAD,
+      mutationMeta: createLocalEntityUpdateMeta(),
+    }));
+    requestCloudSync('urgent');
+    return { ok: true };
+  }, [getScheduleClock, isAdmin, requestCloudSync, shipsData, usersData]);
 
   // Best effort & non-blocking: server menerapkan pergantian bulan bila cron belum sempat jalan.
   const refreshPersonnelPlanOnServer = useCallback(async () => {
@@ -11236,6 +11262,7 @@ export function AppProvider({ children }) {
     handleConfirmAssign,
     handleScheduleAssign,
     handleScheduleRelease,
+    handleScheduleReplaceMonth,
     refreshPersonnelPlanOnServer,
     isEditingShipInfo,
     setIsEditingShipInfo,
@@ -11284,6 +11311,7 @@ export function AppProvider({ children }) {
     handleDownloadShipDoc,
     handleScheduleAssign,
     handleScheduleRelease,
+    handleScheduleReplaceMonth,
     refreshPersonnelPlanOnServer,
     handleRemoveCheckpointFromForm,
     handleSaveShip,

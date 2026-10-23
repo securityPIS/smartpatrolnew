@@ -7,18 +7,22 @@ Main Functions:
   - Tombol + → form tugaskan petugas dengan periode jaga opsional (tidak bisa backdate).
   - Tombol X → konfirmasi lepas tugas, petugas pindah ke sidebar Off duty.
   - Seret nama dari Off duty ke kapal (desktop), urungkan lewat toast.
+  - Mode demo: rencana hanya disalin otomatis ke bulan berjalan +1, dan tombol Clear all (hanya bulan
+    perencanaan, bukan bulan berjalan/bulan lalu) mengosongkan seluruh penugasan bulan itu.
   - PIC: hanya lihat.
 Side Effects: Memanggil handler context yang mengubah shipsData/usersData dan memicu cloud sync.
 */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  CalendarDays, CalendarRange, ChevronLeft, ChevronRight, GripVertical, History, Info, Plus, Search, UserMinus, X,
+  CalendarDays, CalendarRange, ChevronLeft, ChevronRight, Eraser, GripVertical, History, Info, Plus, Search, UserMinus, X,
 } from 'lucide-react';
 import { useRole, useShips, useUI, useUsers } from '../context/AppContextRuntime';
 import { getTrustedDate } from '../services/time/trustedTime';
 import { isPersonnelPlanCloudUnavailable } from '../services/backend/cloudState';
+import { isDemoMode } from '../services/demoMode';
 import {
+  SCHEDULE_DEMO_INHERIT_MONTHS,
   SCHEDULE_HISTORY_MONTHS,
   SCHEDULE_MAX_MONTHS_AHEAD,
   addMonths,
@@ -38,6 +42,9 @@ import {
 import './SchedulePage.css';
 
 const TOAST_MS = 5000;
+// Mode demo: pewarisan rencana dibatasi & Clear all tersedia (go live tetap seperti semula).
+const INHERIT_MONTHS_AHEAD = isDemoMode ? SCHEDULE_DEMO_INHERIT_MONTHS : Infinity;
+const CAN_CLEAR_MONTH = isDemoMode;
 
 const initialsOf = (name = '') => name.split(' ').filter(Boolean).slice(0, 2).map((word) => word[0]).join('').toUpperCase() || 'SP';
 const hueOf = (text = '') => {
@@ -199,6 +206,29 @@ function AssignDialog({ state, setState, ships, offDuty, monthKey, clock, onSubm
   );
 }
 
+function ClearMonthDialog({ monthKey, officerCount, shipCount, busy, onCancel, onConfirm }) {
+  const cancelRef = useRef(null);
+  useEffect(() => { cancelRef.current?.focus(); }, []);
+
+  return (
+    <div className="sched-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+      <div className="sched-dialog is-confirm" role="alertdialog" aria-modal="true" aria-labelledby="sched-clear-title" aria-describedby="sched-clear-text">
+        <div className="sched-confirm">
+          <div className="sched-confirm-ic"><Eraser size={24} /></div>
+          <h2 id="sched-clear-title">Kosongkan penugasan {formatMonthLabel(monthKey)}?</h2>
+          <p id="sched-clear-text">{officerCount} petugas di {shipCount} kapal akan dipindahkan ke daftar off duty untuk {formatMonthLabel(monthKey)}. Bulan berjalan tidak berubah.</p>
+        </div>
+        <div className="sched-dlg-foot">
+          <button ref={cancelRef} className="sched-btn is-ghost" type="button" onClick={onCancel}>Batal</button>
+          <button className="sched-btn is-danger" type="button" onClick={onConfirm} disabled={busy}>
+            {busy ? 'Memproses…' : 'Clear all'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ConfirmDialog({ officerName, shipName, monthKey, busy, onCancel, onConfirm }) {
   const cancelRef = useRef(null);
   useEffect(() => { cancelRef.current?.focus(); }, []);
@@ -223,7 +253,7 @@ function ConfirmDialog({ officerName, shipName, monthKey, busy, onCancel, onConf
 }
 
 const SchedulePage = React.memo(function SchedulePage() {
-  const { shipsData, handleScheduleAssign, handleScheduleRelease, refreshPersonnelPlanOnServer } = useShips();
+  const { shipsData, handleScheduleAssign, handleScheduleRelease, handleScheduleReplaceMonth, refreshPersonnelPlanOnServer } = useShips();
   const { usersData } = useUsers();
   const { isAdmin, isPic } = useRole();
   const { setCurrentPage } = useUI();
@@ -234,6 +264,7 @@ const SchedulePage = React.memo(function SchedulePage() {
   const [assign, setAssign] = useState(null);
   const [confirm, setConfirm] = useState(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
+  const [clearConfirm, setClearConfirm] = useState(false);
   const [toast, setToast] = useState(null);
   const [flashId, setFlashId] = useState(null);
   const [dragging, setDragging] = useState(false);
@@ -241,8 +272,8 @@ const SchedulePage = React.memo(function SchedulePage() {
   const vesselRefs = useRef({});
 
   // Undo memanggil handler TERBARU (bukan closure lama) agar tidak menimpa perubahan lain.
-  const handlersRef = useRef({ handleScheduleAssign, handleScheduleRelease });
-  handlersRef.current = { handleScheduleAssign, handleScheduleRelease };
+  const handlersRef = useRef({ handleScheduleAssign, handleScheduleRelease, handleScheduleReplaceMonth });
+  handlersRef.current = { handleScheduleAssign, handleScheduleRelease, handleScheduleReplaceMonth };
 
   useEffect(() => {
     if (isAdmin) refreshPersonnelPlanOnServer?.();
@@ -270,15 +301,16 @@ const SchedulePage = React.memo(function SchedulePage() {
   }, [flashId]);
 
   useEffect(() => {
-    if (!assign && !confirm) return undefined;
+    if (!assign && !confirm && !clearConfirm) return undefined;
     const onKey = (event) => {
       if (event.key !== 'Escape') return;
-      if (confirm) setConfirm(null);
+      if (clearConfirm) setClearConfirm(false);
+      else if (confirm) setConfirm(null);
       else setAssign(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [assign, confirm]);
+  }, [assign, confirm, clearConfirm]);
 
   const offset = diffMonths(clock.currentMonth, view);
   const isPast = offset < 0;
@@ -293,6 +325,7 @@ const SchedulePage = React.memo(function SchedulePage() {
   const roster = useMemo(() => buildFleetRoster(shipsData, view, {
     currentMonth: clock.currentMonth,
     validUserIds: new Set(officers.map((officer) => officer.id)),
+    inheritMonthsAhead: INHERIT_MONTHS_AHEAD,
   }), [clock.currentMonth, officers, shipsData, view]);
 
   const offDuty = useMemo(() => {
@@ -305,6 +338,8 @@ const SchedulePage = React.memo(function SchedulePage() {
   const searchTerm = query.trim().toLowerCase();
   const visibleShips = shipsData.filter((ship) => ship.name.toLowerCase().includes(searchTerm));
   const anyShipPlanned = offset > 0 && shipsData.some((ship) => isShipMonthPlanned(ship, view));
+  const inheritsPreviousMonth = offset > 0 && offset <= INHERIT_MONTHS_AHEAD;
+  const canClearMonth = CAN_CLEAR_MONTH && isAdmin && offset > 0;
   const cloudPlanUnavailable = isAdmin && offset > 0 && isPersonnelPlanCloudUnavailable();
 
   if (!isAdmin && !isPic) return null;
@@ -397,6 +432,28 @@ const SchedulePage = React.memo(function SchedulePage() {
     });
   };
 
+  const confirmClearMonth = async () => {
+    if (!canClearMonth || confirmBusy) return;
+    const monthKey = view;
+    // Snapshot susunan sebelum dikosongkan → dipakai tombol Urungkan.
+    const snapshot = Object.fromEntries(Object.entries(roster).map(([shipId, entries]) => [
+      shipId,
+      entries.map(({ userId, startDate, endDate }) => ({ userId, startDate, endDate })),
+    ]));
+    setConfirmBusy(true);
+    const result = await handlersRef.current.handleScheduleReplaceMonth({ monthKey });
+    setConfirmBusy(false);
+    setClearConfirm(false);
+    if (!result?.ok) {
+      showToast(result?.error || 'Gagal mengosongkan penugasan.');
+      return;
+    }
+    showToast(`Penugasan ${formatMonthLabel(monthKey)} dikosongkan.`, async () => {
+      await handlersRef.current.handleScheduleReplaceMonth({ monthKey, entriesByShip: snapshot });
+      setView(monthKey);
+    });
+  };
+
   const goMonth = (delta) => {
     const next = addMonths(view, delta);
     const nextOffset = diffMonths(clock.currentMonth, next);
@@ -459,12 +516,30 @@ const SchedulePage = React.memo(function SchedulePage() {
           <span><strong>{offDuty.length}</strong>off duty</span>
           <span><strong>{staffedShips}</strong>dari {shipsData.length} kapal terisi</span>
         </p>
-        <label className="sched-search">
-          <Search size={18} />
-          <span className="sched-sr">Cari kapal</span>
-          <input type="search" placeholder="Cari kapal" autoComplete="off" value={query} onChange={(event) => setQuery(event.target.value)} />
-        </label>
+        <div className="sched-toolbar-actions">
+          {CAN_CLEAR_MONTH && isAdmin && (
+            <button
+              className="sched-btn is-ghost sched-clear-btn"
+              type="button"
+              onClick={() => setClearConfirm(true)}
+              disabled={!canClearMonth || onDutyCount === 0}
+              title={!canClearMonth
+                ? 'Clear all tidak bisa di bulan berjalan dan bulan sebelumnya.'
+                : onDutyCount === 0 ? `Belum ada penugasan di ${formatMonthLabel(view)}.` : `Kosongkan semua penugasan ${formatMonthLabel(view)}`}
+            >
+              <Eraser size={16} /> Clear all
+            </button>
+          )}
+          <label className="sched-search">
+            <Search size={18} />
+            <span className="sched-sr">Cari kapal</span>
+            <input type="search" placeholder="Cari kapal" autoComplete="off" value={query} onChange={(event) => setQuery(event.target.value)} />
+          </label>
+        </div>
       </div>
+      {CAN_CLEAR_MONTH && isAdmin && !canClearMonth && (
+        <p className="sched-clear-hint">Clear all hanya untuk bulan perencanaan — tidak bisa di bulan berjalan dan bulan sebelumnya.</p>
+      )}
 
       {isPast && (
         <div className="sched-notice" role="status">
@@ -479,7 +554,16 @@ const SchedulePage = React.memo(function SchedulePage() {
           <p><strong>Mode lihat.</strong> Hanya admin yang dapat menugaskan atau melepas petugas.</p>
         </div>
       )}
-      {offset > 0 && !anyShipPlanned && (
+      {offset > 0 && !anyShipPlanned && !inheritsPreviousMonth && (
+        <div className="sched-notice is-plan" role="status">
+          <CalendarDays size={20} />
+          <p>
+            <strong>Belum ada rencana {formatMonthLabel(view)}.</strong> Susunan petugas hanya disalin otomatis ke bulan berjalan +1
+            ({formatMonthLabel(addMonths(clock.currentMonth, INHERIT_MONTHS_AHEAD))}). Tugaskan petugas untuk bulan ini secara manual.
+          </p>
+        </div>
+      )}
+      {offset > 0 && !anyShipPlanned && inheritsPreviousMonth && (
         <div className="sched-notice is-plan" role="status">
           <CalendarDays size={20} />
           <p>
@@ -506,7 +590,7 @@ const SchedulePage = React.memo(function SchedulePage() {
             <p className="sched-empty">Tidak ada kapal yang cocok dengan “{query.trim()}”.</p>
           ) : visibleShips.map((ship) => {
             const crew = (roster[ship.id] || []).filter((entry) => officerById[entry.userId]);
-            const isInherited = offset > 0 && crew.length > 0 && crew.every((entry) => entry.source === 'inherited');
+            const isInherited = inheritsPreviousMonth && crew.length > 0 && crew.every((entry) => entry.source === 'inherited');
             return (
               <article
                 key={ship.id}
@@ -643,6 +727,17 @@ const SchedulePage = React.memo(function SchedulePage() {
           clock={clock}
           onSubmit={submitAssign}
           onClose={() => setAssign(null)}
+        />
+      )}
+
+      {clearConfirm && canClearMonth && (
+        <ClearMonthDialog
+          monthKey={view}
+          officerCount={onDutyCount}
+          shipCount={staffedShips}
+          busy={confirmBusy}
+          onCancel={() => setClearConfirm(false)}
+          onConfirm={confirmClearMonth}
         />
       )}
 

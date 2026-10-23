@@ -17,6 +17,8 @@ import {
   getJakartaDateKey,
   normalizePersonnelMonthlyPlan,
   releaseFromMonthPlan,
+  replaceMonthPlan,
+  SCHEDULE_DEMO_INHERIT_MONTHS,
   validateSchedulePeriod,
 } from '../../src/utils/personnelSchedule.js';
 
@@ -92,6 +94,33 @@ test('legacy Next Assignment yang dilepas dari rencana tidak muncul kembali', ()
   assert.deepEqual(ids(buildFleetRoster(ships, '2026-12', ctx).s2), ['u3', 'u4']);
 });
 
+test('mode demo: rencana hanya disalin otomatis ke bulan berjalan +1', () => {
+  const demo = { ...ctx, inheritMonthsAhead: SCHEDULE_DEMO_INHERIT_MONTHS };
+  assert.deepEqual(ids(buildFleetRoster(fleet(), '2026-11', demo).s1), ['u1'], 'November mewarisi Oktober');
+  const dec = buildFleetRoster(fleet(), '2026-12', demo);
+  assert.deepEqual(ids(dec.s1), [], 'Desember tidak mewarisi November');
+  assert.deepEqual(ids(dec.s2), ['u5'], 'Next Assignment yang mulai Desember tetap tampil');
+  // Rencana eksplisit Desember tetap dipakai, Januari kosong lagi.
+  const ships = assignToMonthPlan(fleet(), { ...demo, shipId: 's1', userId: 'u3', monthKey: '2026-12' });
+  assert.deepEqual(ids(buildFleetRoster(ships, '2026-12', demo).s1), ['u3']);
+  assert.deepEqual(ids(buildFleetRoster(ships, '2027-01', demo).s1), []);
+});
+
+test('clear all mengosongkan bulan perencanaan saja dan bisa diurungkan', () => {
+  const before = buildFleetRoster(fleet(), '2026-11', ctx);
+  const cleared = replaceMonthPlan(fleet(), { ...ctx, monthKey: '2026-11' });
+  const nov = buildFleetRoster(cleared, '2026-11', ctx);
+  assert.deepEqual([...ids(nov.s1), ...ids(nov.s2)], []);
+  assert.deepEqual(ids(buildFleetRoster(cleared, CUR, ctx).s1), ['u1', 'u2'], 'bulan berjalan tidak berubah');
+  const unchanged = fleet();
+  assert.equal(replaceMonthPlan(unchanged, { ...ctx, monthKey: CUR }), unchanged, 'bulan berjalan ditolak');
+  assert.equal(replaceMonthPlan(unchanged, { ...ctx, monthKey: '2026-09' }), unchanged, 'bulan lalu ditolak');
+  const restored = replaceMonthPlan(cleared, { ...ctx, monthKey: '2026-11', entriesByShip: before });
+  const again = buildFleetRoster(restored, '2026-11', ctx);
+  assert.deepEqual(ids(again.s1), ids(before.s1));
+  assert.deepEqual(ids(again.s2), ids(before.s2));
+});
+
 test('riwayat bulan lalu dibaca dari snapshot rencana', () => {
   const ships = fleet();
   ships[0].personnelMonthlyPlan = { applied: CUR, months: { '2026-09': [{ userId: 'u9', startDate: '', endDate: '' }] } };
@@ -132,7 +161,7 @@ test('halaman, menu, context, dan migration terhubung', () => {
 
   assert.match(appSource, /currentPage === 'schedule' && \(canAccessDashboard \? <SchedulePage \/>/);
   assert.match(headerSource, /setCurrentPage\('schedule'\)/);
-  assert.match(runtimeSource, /handleScheduleAssign,\n\s+handleScheduleRelease,\n\s+refreshPersonnelPlanOnServer,/);
+  assert.match(runtimeSource, /handleScheduleAssign,\n\s+handleScheduleRelease,\n\s+handleScheduleReplaceMonth,\n\s+refreshPersonnelPlanOnServer,/);
   assert.match(cloudSource, /personnel_monthly_plan: normalizePersonnelMonthlyPlan/);
   assert.match(cloudSource, /isMissingPersonnelPlanColumnError/, 'sync kapal tetap jalan sebelum migration diterapkan');
   assert.match(migrationSource, /add column if not exists personnel_monthly_plan jsonb/);

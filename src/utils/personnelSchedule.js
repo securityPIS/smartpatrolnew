@@ -7,12 +7,15 @@ Main Functions:
   - normalizePersonnelMonthlyPlan: sanitasi kolom ships.personnel_monthly_plan.
   - buildFleetRoster: susunan petugas tiap kapal untuk satu bulan (riwayat / berjalan / rencana).
   - assignToMonthPlan / releaseFromMonthPlan: mutasi rencana bulan depan (eksklusif lintas kapal).
+  - replaceMonthPlan: ganti seluruh rencana satu bulan perencanaan (Clear all / urungkan).
   - validateSchedulePeriod: aturan periode opsional, tidak boleh mundur tanggal (backdate).
 Aturan sumber data:
   - Bulan lalu      : plan.months[M] (snapshot saat pergantian bulan), hanya lihat.
   - Bulan berjalan  : ship.personnel (+ personnelNextMonth yang mulai bulan ini) = penugasan operasional.
   - Bulan depan     : plan.months[M] bila sudah direncanakan; jika belum, mewarisi bulan sebelumnya
                       (tanpa petugas yang periodenya sudah selesai) + "Next Assignment" lama yang mulai di M.
+                      Opsi inheritMonthsAhead membatasi pewarisan (mode demo: 1 = hanya bulan berjalan +1;
+                      bulan sesudahnya kosong sampai direncanakan).
   - Pergantian bulan diterapkan server (public.apply_personnel_monthly_plan) dengan aturan yang sama.
 Side Effects: Tidak ada; semua helper bersifat pure function.
 */
@@ -20,6 +23,8 @@ Side Effects: Tidak ada; semua helper bersifat pure function.
 export const SCHEDULE_TIME_ZONE = 'Asia/Jakarta';
 export const SCHEDULE_MAX_MONTHS_AHEAD = 12;
 export const SCHEDULE_HISTORY_MONTHS = 12;
+// Mode demo: susunan petugas hanya disalin otomatis ke bulan berjalan +1.
+export const SCHEDULE_DEMO_INHERIT_MONTHS = 1;
 
 export const MONTH_NAMES_ID = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 export const MONTH_SHORT_ID = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
@@ -201,6 +206,7 @@ export function buildFleetRoster(ships = [], monthKey, options = {}) {
   const currentMonth = options.currentMonth;
   const validUserIds = options.validUserIds instanceof Set ? options.validUserIds : null;
   const offset = diffMonths(currentMonth, monthKey);
+  const inheritMonthsAhead = Number.isFinite(options.inheritMonthsAhead) ? options.inheritMonthsAhead : Infinity;
 
   if (offset < 0) {
     const { roster, claim } = createRosterCollector(safeShips, validUserIds);
@@ -239,7 +245,7 @@ export function buildFleetRoster(ships = [], monthKey, options = {}) {
         .forEach((entry) => claim(ship.id, entry, 'legacy'));
     });
     safeShips.forEach((ship) => {
-      if (isShipMonthPlanned(ship, stepMonth)) return;
+      if (step > inheritMonthsAhead || isShipMonthPlanned(ship, stepMonth)) return;
       (previousRoster[ship.id] || [])
         .filter((entry) => !entry.endDate || entry.endDate >= stepStart)
         .forEach((entry) => claim(ship.id, { userId: entry.userId, startDate: '', endDate: entry.endDate }, 'inherited'));
@@ -345,6 +351,28 @@ export function releaseFromMonthPlan(ships = [], options = {}) {
       return others.length === entries.length ? entries : others;
     });
     return withMeta(ships[index], updated, mutationMeta);
+  });
+}
+
+/*
+Ganti SELURUH rencana bulan monthKey (> bulan berjalan) untuk semua kapal: entriesByShip kosong =
+Clear all (semua petugas off duty di bulan itu), berisi snapshot roster = urungkan Clear all.
+Bulan berjalan & bulan lalu tidak bisa diubah lewat fungsi ini.
+*/
+export function replaceMonthPlan(ships = [], options = {}) {
+  const { monthKey, currentMonth, entriesByShip = {}, mutationMeta = {} } = options;
+  if (!isMonthKey(monthKey) || diffMonths(currentMonth, monthKey) <= 0) return ships;
+  const materialized = materializeMonthPlan(ships, monthKey, options);
+  const claimed = new Set();
+
+  return materialized.map((ship, index) => {
+    if (!ship?.id) return ship;
+    const entries = normalizeEntryList(entriesByShip[ship.id]).filter((entry) => {
+      if (claimed.has(entry.userId)) return false;
+      claimed.add(entry.userId);
+      return true;
+    });
+    return withMeta(ships[index], setMonthEntries(ship, monthKey, () => entries), mutationMeta);
   });
 }
 

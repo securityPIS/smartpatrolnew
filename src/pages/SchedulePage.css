@@ -238,6 +238,37 @@ Side Effects: Tidak ada; seluruh selector diawali .sched / .sched-layer agar tid
   margin-right: 3px;
 }
 
+.sched-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Clear all (mode demo): hanya aktif di bulan perencanaan. */
+.sched-btn.sched-clear-btn {
+  height: 40px;
+  padding: 0 14px;
+  color: var(--s-danger);
+}
+
+.sched-btn.sched-clear-btn:hover:not(:disabled) {
+  border-color: var(--s-danger);
+  color: var(--s-danger) !important;
+  background: var(--s-danger-soft);
+}
+
+.sched-btn.sched-clear-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.sched-clear-hint {
+  margin: -6px 0 14px;
+  font-size: 12px;
+  color: var(--s-muted);
+  text-align: right;
+}
+
 .sched-search {
   display: flex;
   align-items: center;
@@ -1209,8 +1240,18 @@ button.sched-off-item:active {
     align-items: stretch;
   }
 
+  .sched-toolbar-actions {
+    flex-direction: row-reverse;
+  }
+
   .sched-search {
     width: 100%;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .sched-clear-hint {
+    text-align: left;
   }
 
   .sched-search input {

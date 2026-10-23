@@ -87,6 +87,11 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
   badge `crewBadge` hanya "Absensi x/y" (x = petugas jaga yang sudah absen); label di bawah nama dari absensi
   (`getAttendanceStatusView`): "Istirahat - Kondisi Baik/Tidak Baik" / "Patroli - Kondisi Baik" / "Belum absensi";
   kartu petugas bisa diklik (`onCrewClick`) → `AttendanceDetailModal` (status, keterangan, foto absensi, DCU + foto).
+- Jadwal Penugasan (`SchedulePage`, `utils/personnelSchedule.js`) di DEMO saja: rencana hanya disalin otomatis
+  ke bulan berjalan +1 (`inheritMonthsAhead = SCHEDULE_DEMO_INHERIT_MONTHS`, dipakai roster & handler runtime);
+  bulan +2 dst. kosong sampai direncanakan. Tombol **Clear all** (admin) → `handleScheduleReplaceMonth` /
+  `replaceMonthPlan` mengosongkan seluruh rencana satu bulan (bisa Urungkan via snapshot roster); DITOLAK
+  untuk bulan berjalan & bulan sebelumnya. Go live tetap pewarisan berantai tanpa Clear all.
 - Fungsi `subscribeTo*` di services/backend harus return noop bila `!isSupabaseConfigured` (dulu throw →
   crash dashboard admin). Satu-satunya request backend di demo: trusted time `server-time` (baca jam saja).
 

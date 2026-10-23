@@ -1,5 +1,5 @@
 /*
-Tujuan: Mode demo — masuk dengan akun dummy (petugas/admin) tanpa Supabase. Data demo hanya di memori:
+Tujuan: Mode demo — masuk dengan akun dummy (petugas/PIC/admin) tanpa Supabase. Data demo hanya di memori:
         tidak dibaca dari / ditulis ke penyimpanan lokal maupun cloud, sehingga data asli di perangkat
         dan server tidak tersentuh.
 Caller: LoginPage (masuk demo), App (banner), services/backend/app.js (matikan Supabase),
@@ -13,6 +13,7 @@ export const DEMO_QUERY_PARAM = 'demo';
 
 export const DEMO_ACCOUNTS = Object.freeze({
   petugas: { key: 'petugas', userId: 'demo-petugas', label: 'Petugas (Demo)', description: 'Patroli kapal KM Demo Nusantara' },
+  pic: { key: 'pic', userId: 'demo-pic', label: 'PIC Security (Demo)', description: 'Tindak lanjut & verifikasi temuan' },
   admin: { key: 'admin', userId: 'demo-admin', label: 'Admin (Demo)', description: 'Kelola armada, user, dan laporan' },
 });
 

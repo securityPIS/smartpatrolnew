@@ -3,18 +3,18 @@ Tujuan: Menyajikan form login Supabase Auth dan registrasi publik terisolasi Sma
 Caller: App shell saat belum ada sesi user operasional aktif.
 Dependensi: Auth context runtime, ikon Lucide, dan AsyncImage untuk foto onboarding.
 Main Functions: Login user operasional, kirim registrasi publik, upload foto profil onboarding, dan
-                masuk dengan akun demo (petugas/admin, data dummy tidak disimpan).
+                masuk dengan akun demo (petugas/PIC/admin, data dummy tidak disimpan).
 Side Effects: Memicu handler auth/register context serta menyimpan foto onboarding ke state form.
 */
 
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AppContextRuntime';
-import { Shield, Ship, Eye, EyeOff, Camera, AlertTriangle, X, UserCog, UserRound, FlaskConical } from 'lucide-react';
+import { Shield, Ship, Eye, EyeOff, Camera, AlertTriangle, X, UserCog, UserRound, FlaskConical, ShieldCheck } from 'lucide-react';
 import { DEMO_ACCOUNTS, enterDemoMode, exitDemoMode, isDemoMode } from '../services/demoMode';
 import { acknowledgeLatestAutoLogout, readAutoLogoutLog } from '../utils/autoLogoutLog';
 import AsyncImage from '../components/AsyncImage';
 
-const DEMO_ACCOUNT_ICONS = { petugas: UserRound, admin: UserCog };
+const DEMO_ACCOUNT_ICONS = { petugas: UserRound, pic: ShieldCheck, admin: UserCog };
 
 // Pilihan masuk dengan akun dummy. Aplikasi dimuat ulang ke mode demo: tanpa Supabase dan tanpa
 // menyimpan data apa pun, sehingga aman dipakai untuk mencoba alur.
@@ -45,7 +45,7 @@ function DemoAccountPicker() {
               key={account.key}
               type="button"
               onClick={() => enterDemoMode(account.key)}
-              className="p-3 rounded-xl border border-fuchsia-500/40 bg-fuchsia-500/5 hover:bg-fuchsia-500/15 text-left transition-all"
+              className="p-3 rounded-xl border border-fuchsia-500/40 bg-fuchsia-500/5 hover:bg-fuchsia-500/15 text-left transition-all odd:last:col-span-2"
               aria-label={`Masuk sebagai ${account.label}`}
             >
               <Icon className="w-5 h-5 text-fuchsia-300 mb-1.5" />

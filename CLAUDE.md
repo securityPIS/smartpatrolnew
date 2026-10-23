@@ -52,12 +52,19 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
 - `npm run build` (vite). `npm run test:security` (15 test). Test halaman: 49 test.
 
 ## Mode demo (akun dummy) — `src/services/demoMode.js`, `src/data/demoData.js`
-- LoginPage: "Masuk dengan Akun Demo" (Petugas/Admin) → reload ke `?demo=petugas|admin`. Banner ungu
+- LoginPage: "Masuk dengan Akun Demo" (Petugas/PIC Security/Admin) → reload ke `?demo=petugas|pic|admin`. Banner ungu
   `DemoModeBanner` + tombol Keluar (logout di demo = `exitDemoMode()`, reload tanpa param).
 - Isolasi: `isSupabaseConfigured=false` (tanpa client/auth/cloud/outbox worker), persisted state & sesi
   tidak dibaca/ditulis localStorage, foto tidak ke IndexedDB (data URL di memori), outbox no-op.
   Dataset: `createDemoUsers/createDemoShips` lewat `getMockUsersList/getInitialShipsData`. Kapal demo WAJIB
   punya `personnel` (rekonsiliasi shipAssigned) agar petugas tidak ter-logout "off-duty".
+- Dataset demo: 3 kapal (KM Demo Nusantara / MT Demo Samudra / KM Demo Bahari) dgn titik main/sub ber-NFC,
+  petugas + PIC Security per kapal, 1 petugas cadangan off-duty. `createDemoPatrolHistory()` = riwayat shift
+  sebelumnya (relatif ke shift berjalan; titik tak disebut → AMAN) + temuan dgn tindak lanjut PIC fungsi di
+  berbagai status (Need Assign, In Progress, revisi, Need Decision, Need Verification, verifikasi ditolak,
+  Closed, Unsolve "Pagar Dek Kiri" = `demo-unsolve-incident`). Dibangun sekali di `getDemoSeedState()`
+  (AppContextRuntime): historyEntries + incidentMeta (Riwayat Update, status closed) + `seedDemoIncidentStates`
+  (followUpStore: follow-up/verifikasi/closure/unsolve; entri `[kind, jamSetelahTemuan, aktor, komentar, verdict?]`).
 - Kapal demo punya titik "Pagar Dek Kiri" yang di-seed Unsolve (override foto acuan di followUpStore saat
   isDemoMode) → AMAN/TEMUAN membuat laporan sungguhan (data dummy), seperti go live. Kartu contoh
   "Pagar Dek Kiri (Contoh)" hanya tampil di mode normal. Peringatan "Sinkronisasi nonaktif" dimatikan di demo.

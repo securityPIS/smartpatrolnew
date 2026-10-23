@@ -105,7 +105,8 @@ import {
   normalizeTimeAuditRecord,
 } from '../services/time/timeAudit';
 import { demoAccount, exitDemoMode, isDemoMode } from '../services/demoMode';
-import { createDemoShips, createDemoUsers } from '../data/demoData';
+import { createDemoPatrolHistory, createDemoShips, createDemoUsers } from '../data/demoData';
+import { seedDemoIncidentStates } from '../components/incidentFollowUp/followUpStore';
 
 // --- DATA MOCKUP ---
 const ACCESS_ROLES = {
@@ -4734,6 +4735,101 @@ function createSeedHistoryEntries() {
   ]);
 }
 
+// Mode demo: riwayat patroli shift sebelumnya (relatif ke shift berjalan) + Riwayat Update temuan,
+// dan status tindak lanjut temuan di followUpStore. Dibangun sekali per muat halaman.
+let _demoSeedState = null;
+function getDemoSeedState() {
+  if (_demoSeedState) return _demoSeedState;
+  const ships = normalizeShipsCollection(getInitialShipsData());
+  const users = getMockUsersList();
+  const usersById = new Map(users.map(user => [user.id, user]));
+  const userNames = Object.fromEntries(users.map(user => [user.id, user.name]));
+  const currentShiftMeta = getShiftMeta(getTrustedDate());
+  const historyEntries = [];
+  const incidentMeta = {};
+  const incidentSeeds = [];
+
+  createDemoPatrolHistory().forEach((spec) => {
+    const ship = ships.find(item => item.id === spec.shipId);
+    if (!ship) return;
+    const shiftMeta = shiftMetaFromParts(addDaysToDateKey(currentShiftMeta.dateKey, -spec.daysAgo), spec.shiftId);
+    const { startAt, endAt } = getShiftScheduleTimes(shiftMeta);
+    const guards = users.filter(user => user.role === ACCESS_ROLES.PETUGAS && user.shipAssigned === ship.name);
+    const securityName = users.find(user => user.role === ACCESS_ROLES.PIC && user.shipAssigned === ship.name)?.name;
+    const missedKeys = new Set(ensureArray(spec.missed).map(createCheckpointNameKey));
+    const temuanByKey = new Map(ensureArray(spec.temuan).map(temuan => [createCheckpointNameKey(temuan.checkpointName), temuan]));
+    const baseCheckpoints = createShipCheckpointCollection(ship);
+    const stepMs = (endAt.getTime() - startAt.getTime()) / (baseCheckpoints.length + 2);
+
+    const checkpoints = baseCheckpoints.map((checkpoint, index) => {
+      const nameKey = createCheckpointNameKey(checkpoint.name);
+      if (missedKeys.has(nameKey)) return checkpoint;
+      const temuan = temuanByKey.get(nameKey) || null;
+      const reporter = usersById.get(temuan?.reporterId) || guards[index % Math.max(guards.length, 1)] || null;
+      const completedDate = new Date(temuan
+        ? startAt.getTime() + (temuan.offsetMinutes * MINUTE_IN_MS)
+        : startAt.getTime() + ((index + 1) * stepMs));
+      const completedAt = completedDate.toISOString();
+      const record = {
+        ...checkpoint,
+        status: 'completed',
+        completedBy: reporter?.name || 'Petugas Security',
+        completedByUserId: reporter?.id || null,
+        date: shiftMeta.dateLabel,
+        time: formatAppTime(completedDate),
+        completedAt,
+        updatedAt: completedAt,
+        shiftKey: shiftMeta.key,
+        photoUrl: createPosterDataUrl(temuan ? 'TEMUAN' : 'AMAN', checkpoint.name, temuan ? 2 : 1, true),
+        resultType: temuan ? 'temuan' : 'aman',
+        kejadian: temuan?.kejadian || '',
+        penyebab: temuan?.penyebab || '',
+        tindakLanjut: temuan?.tindakLanjut || '',
+        incidentId: temuan?.incidentId || null,
+      };
+      if (!temuan) return record;
+
+      const reportedMs = completedDate.getTime();
+      const progress = ensureArray(temuan.progress).map(([hours, authorId, comment], progressIndex) => {
+        const createdDate = new Date(Math.min(reportedMs + (hours * 60 * MINUTE_IN_MS), Date.now() - MINUTE_IN_MS));
+        return {
+          id: `progress-${temuan.incidentId}-${progressIndex + 1}`,
+          comment,
+          photoUrl: null,
+          time: formatAppTime(createdDate),
+          date: formatAppDate(createdDate),
+          author: userNames[authorId] || authorId,
+          createdAt: createdDate.toISOString(),
+        };
+      });
+      const isFinished = Boolean(temuan.closure || temuan.unsolve);
+      if (progress.length > 0 || isFinished) {
+        incidentMeta[temuan.incidentId] = { status: isFinished ? 'closed' : 'open', progress, documentation: [] };
+      }
+      incidentSeeds.push({
+        ...temuan,
+        reportedAt: completedAt,
+        securityName,
+        userNames,
+        shipId: ship.id,
+        location: checkpoint.name,
+        deskripsi: record.kejadian,
+        date: record.date,
+        time: record.time,
+        reportedBy: record.completedBy,
+        photoUrl: record.photoUrl,
+      });
+      return record;
+    });
+
+    historyEntries.push(buildHistoryEntry({ shiftMeta, checkpoints, ship, users, weatherInfo: spec.weather }));
+  });
+
+  seedDemoIncidentStates(incidentSeeds);
+  _demoSeedState = { historyEntries: sortHistoryEntries(historyEntries), incidentMeta };
+  return _demoSeedState;
+}
+
 const persistedState = loadPersistedState();
 
 // --- CONTEXT ---
@@ -4798,7 +4894,7 @@ export function AppProvider({ children }) {
   const initialShiftState = migrateCheckpointStateToCurrentShift({
     ships: initialShipsCollection,
     checkpointsByShip: initialRawCheckpointsByShip,
-    historyEntries: sortHistoryEntries(persistedState?.historyEntries || createSeedHistoryEntries()),
+    historyEntries: sortHistoryEntries(persistedState?.historyEntries || (isDemoMode ? getDemoSeedState().historyEntries : createSeedHistoryEntries())),
     shiftStatusRecords: persistedState?.shiftStatusRecords || {},
     users: initialUsersCollection,
     currentShiftMeta: initialCurrentShiftMeta,
@@ -4999,7 +5095,7 @@ export function AppProvider({ children }) {
   const [weatherLoading, setWeatherLoading] = useState(() => !loadWeatherCache());
   const [submittingPatrolId, setSubmittingPatrolId] = useState(null);
   const [selectedIncident, setSelectedIncident] = useState(null);
-  const [incidentMeta, setIncidentMeta] = useState(() => persistedState?.incidentMeta || {});
+  const [incidentMeta, setIncidentMeta] = useState(() => persistedState?.incidentMeta || (isDemoMode ? getDemoSeedState().incidentMeta : {}));
   const [deletedRecords, setDeletedRecords] = useState(() => createDeletedRecordsState(persistedState?.deletedRecords));
   const [newProgress, setNewProgress] = useState({ comment: '', photoUrl: null, heroUrl: null, thumbUrl: null });
   const [showUserForm, setShowUserForm] = useState(false);

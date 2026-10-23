@@ -9,7 +9,7 @@ Dependensi: React useSyncExternalStore, shipCheckpoints (kunci nama).
 Main Functions: useIncidentFollowUps, useIncidentVerification, getIncidentVerificationState,
                 assignFollowUp, submitFollowUpUpdate, submitSecurityReview, returnFollowUpToPic,
                 requestIncidentVerification, submitIncidentVerification, requestReverification, unsolveIncident,
-                isPatrolTemuanOpen, getCheckpointReferenceOverride, seedDemoFollowUps,
+                isPatrolTemuanOpen, getCheckpointReferenceOverride, seedDemoFollowUps, seedDemoIncidentStates,
                 getFollowUpStatusView, getIncidentStatusView (label status per POV role).
 Side Effects: Hanya state modul di memori; hilang saat aplikasi di-restart (sengaja, versi tampilan).
 */
@@ -418,6 +418,87 @@ export function seedDemoFollowUps(incident, { securityName }) {
   }));
 
   updateIncidentFollowUps(incident?.id, (items) => [...demo, ...items]);
+}
+
+/*
+Akun demo: isi status tindak lanjut temuan riwayat patroli dummy (data/demoData.js) sekali saat
+aplikasi dimuat. Entri spec: [kind, jamSetelahTemuan, aktor, komentar, verdict?, planConfirmed?];
+aktor 'security' = PIC Security kapal, 'assignee' = PIC fungsi, selain itu id user (nama dari
+userNames). Waktu dibatasi maksimal "sekarang" agar tidak ada log di masa depan.
+*/
+export function seedDemoIncidentStates(seeds = []) {
+  const nowMs = Date.now() - 60_000;
+  seeds.forEach((seed) => {
+    const key = String(seed?.incidentId || '');
+    const baseMs = new Date(seed?.reportedAt || '').getTime();
+    if (!key || !Number.isFinite(baseMs)) return;
+    const securityName = seed.securityName || 'PIC Security';
+    const userNames = seed.userNames || {};
+    const at = (hours) => new Date(Math.min(baseMs + hours * 3_600_000, nowMs)).toISOString();
+    const resolveActor = (token, assigneeId) => {
+      if (token === 'security') return { actorName: securityName, actorRole: 'PIC Security' };
+      if (token === 'assignee') {
+        const assignee = getAssigneeMeta(assigneeId, securityName);
+        return { actorName: assignee.personName, actorRole: `PIC ${assignee.functionName}` };
+      }
+      return { actorName: userNames[token] || token, actorRole: 'Petugas Security' };
+    };
+    const toEntry = ([kind, hours, actor, comment = '', verdict = null, planConfirmed = false], assigneeId) => ({
+      ...createEntry(kind, { ...resolveActor(actor, assigneeId), comment, verdict, planConfirmed }),
+      at: at(hours),
+    });
+    const { followUp, verification, closure, unsolve } = seed;
+
+    if (followUp?.items?.length) {
+      followUpsByIncident.set(key, followUp.items.map((item) => {
+        const entries = item.entries.map((spec) => toEntry(spec, item.assigneeId));
+        return {
+          id: createId('fu'),
+          assigneeId: item.assigneeId,
+          instruction: item.instruction,
+          photoUrl: null,
+          status: item.status,
+          createdAt: entries[0]?.at || at(0),
+          createdBy: securityName,
+          entries,
+        };
+      }));
+    }
+    if (verification) {
+      verificationsByIncident.set(key, {
+        entries: (verification.entries || []).map((spec) => toEntry(spec)),
+        awaitingSecurityDecision: Boolean(verification.awaitingSecurityDecision),
+        verificationRequested: Boolean(verification.requested),
+        postponedNotice: null,
+      });
+    }
+    if (closure) {
+      const [hours, actor, comment] = closure;
+      closuresByIncident.set(key, { id: createId('fu-close'), at: at(hours), ...resolveActor(actor), comment, photoUrl: null });
+    }
+    if (unsolve) {
+      const [hours, actor, comment] = unsolve;
+      const checkpointKey = createCheckpointTemuanKey(seed.shipId, seed.location);
+      const existingOverride = getCheckpointReferenceOverride(checkpointKey);
+      const referencePhotoUrl = existingOverride?.referencePhotoUrl || seed.photoUrl || null;
+      const unsolveAt = at(hours);
+      const { actorName } = resolveActor(actor);
+      unsolvesByIncident.set(key, { id: createId('fu-unsolve'), at: unsolveAt, actorName, comment, photoUrl: null, referencePhotoUrl, checkpointKey });
+      if (checkpointKey && referencePhotoUrl) {
+        referenceOverridesByCheckpoint.set(checkpointKey, {
+          ...existingOverride,
+          referencePhotoUrl,
+          updatedAt: unsolveAt,
+          incidentId: key,
+          note: comment,
+          actorName,
+          temuan: { deskripsi: seed.deskripsi || '', date: seed.date || '', time: seed.time || '', reportedBy: seed.reportedBy || '' },
+          followUpCount: followUp?.items?.length || 0,
+        });
+      }
+    }
+  });
+  emitChange();
 }
 
 const VERIFICATION_LOG_HEADLINE = {

@@ -5661,11 +5661,17 @@ export function AppProvider({ children }) {
   const isCurrentUserShiftGuard = Boolean(
     isPetugas && currentUserRecord?.id && activeOperationalGuards.some(user => user.id === currentUserRecord.id),
   );
-  const isCurrentShiftStatusCompleted = !isShiftStatusRequired || (
-    isDemoMode && isCurrentUserShiftGuard
-      ? ensureArray(currentShiftStatusRecord?.items).some(item => item.userId === currentUserRecord.id && item.attendancePhotoUrl)
-      : hasFilledShiftStatusRecord(currentShiftStatusRecord)
-  );
+  // Mode demo: absensi bisa dilewati (skip) per user per kapal per shift → checklist terbuka tanpa
+  // absensi. Hanya di memori (demo tidak menyimpan state); go live tetap wajib.
+  const [skippedAttendanceKeys, setSkippedAttendanceKeys] = useState(() => new Set());
+  const currentAttendanceSkipKey = isDemoMode && operationalShip?.id && currentUserRecord?.id
+    ? `${operationalShip.id}|${currentShiftMeta.key}|${currentUserRecord.id}`
+    : '';
+  const isCurrentShiftAttendanceSkipped = Boolean(currentAttendanceSkipKey && skippedAttendanceKeys.has(currentAttendanceSkipKey));
+  const hasFilledCurrentShiftStatus = isDemoMode && isCurrentUserShiftGuard
+    ? ensureArray(currentShiftStatusRecord?.items).some(item => item.userId === currentUserRecord.id && item.attendancePhotoUrl)
+    : hasFilledShiftStatusRecord(currentShiftStatusRecord);
+  const isCurrentShiftStatusCompleted = !isShiftStatusRequired || hasFilledCurrentShiftStatus || isCurrentShiftAttendanceSkipped;
   const canAddTemporaryPatrolNode = Boolean(isPetugas && canPatrolCurrentShip && operationalShip && !selectedHistoryEntry);
   const shouldForcePatrolCameraCapture = true;
 
@@ -8077,6 +8083,11 @@ export function AppProvider({ children }) {
   const closeShiftStatusModal = useCallback(() => {
     setShowShiftStatusModal(false);
   }, []);
+  const skipCurrentShiftAttendance = useCallback(() => {
+    if (!currentAttendanceSkipKey) return;
+    setSkippedAttendanceKeys(previous => new Set(previous).add(currentAttendanceSkipKey));
+    setShowShiftStatusModal(false);
+  }, [currentAttendanceSkipKey]);
   const handleSaveCurrentShiftStatus = useCallback((items = []) => {
     if (!operationalShip?.id || !currentUserRecord) return false;
     if (showTrustedTimeGateDialog()) return false;
@@ -11183,6 +11194,9 @@ export function AppProvider({ children }) {
     canPatrolCurrentShip,
     isShiftStatusRequired,
     isCurrentShiftStatusCompleted,
+    hasFilledCurrentShiftStatus,
+    isCurrentShiftAttendanceSkipped,
+    skipCurrentShiftAttendance,
     showShiftStatusModal,
     canAddTemporaryPatrolNode,
     shouldForcePatrolCameraCapture,
@@ -11234,6 +11248,9 @@ export function AppProvider({ children }) {
     handlePhotoUpload,
     handleSubmitPatrol,
     isCurrentShiftStatusCompleted,
+    hasFilledCurrentShiftStatus,
+    isCurrentShiftAttendanceSkipped,
+    skipCurrentShiftAttendance,
     isShiftStatusRequired,
     newCustomNode,
     openShiftStatusModal,

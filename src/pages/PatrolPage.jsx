@@ -170,6 +170,7 @@ const PatrolPage = React.memo(function PatrolPage() {
     completedCount, totalCount, progressPercentage, newCustomNode, setNewCustomNode,
     checkpoints, activeShiftGuardSnapshot, currentShiftMeta, currentShiftSchedule, canPatrolCurrentShip, canAddTemporaryPatrolNode,
     activeForms, isShiftStatusRequired, isCurrentShiftStatusCompleted, showShiftStatusModal, openShiftStatusModal, currentShiftStatusRecord,
+    isCurrentShiftAttendanceSkipped, hasFilledCurrentShiftStatus, skipCurrentShiftAttendance,
     pendingPatrolCameraCapture,
   } = usePatrol();
   const { operationalShip, operationalShipName, shipsData } = useShips();
@@ -867,14 +868,39 @@ const PatrolPage = React.memo(function PatrolPage() {
                         : 'Checklist patroli masih terkunci sampai status petugas shift ini disimpan.'}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={openShiftStatusModal}
-                    className="shrink-0 rounded-xl border border-amber-400/40 bg-amber-500/15 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-amber-100 transition hover:bg-amber-500/25"
-                  >
-                    {isDemoMode ? 'Isi Absensi' : 'Isi Status'}
-                  </button>
+                  <div className="shrink-0 flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={openShiftStatusModal}
+                      className="rounded-xl border border-amber-400/40 bg-amber-500/15 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-amber-100 transition hover:bg-amber-500/25"
+                    >
+                      {isDemoMode ? 'Isi Absensi' : 'Isi Status'}
+                    </button>
+                    {isDemoMode && (
+                      <button
+                        type="button"
+                        onClick={skipCurrentShiftAttendance}
+                        className="rounded-xl border border-fuchsia-400/40 bg-fuchsia-500/10 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-fuchsia-100 transition hover:bg-fuchsia-500/20"
+                      >
+                        Lewati
+                      </button>
+                    )}
+                  </div>
                 </div>
+              </div>
+            )}
+
+            {/* Mode demo: absensi dilewati → checklist terbuka; absensi tetap bisa diisi kapan saja. */}
+            {!isHistoryMode && isDemoMode && isCurrentShiftAttendanceSkipped && !hasFilledCurrentShiftStatus && (
+              <div className="rounded-2xl border border-fuchsia-500/30 bg-fuchsia-950/20 px-4 py-3 flex items-center justify-between gap-3">
+                <p className="text-xs text-fuchsia-100">Absensi shift ini dilewati (demo). Checklist patroli tetap terbuka.</p>
+                <button
+                  type="button"
+                  onClick={openShiftStatusModal}
+                  className="shrink-0 rounded-xl border border-fuchsia-400/40 bg-fuchsia-500/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-fuchsia-100 transition hover:bg-fuchsia-500/20"
+                >
+                  Isi Absensi
+                </button>
               </div>
             )}
 

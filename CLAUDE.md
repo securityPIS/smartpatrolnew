@@ -83,7 +83,9 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
   (DCU): suhu °C + tekanan darah sistolik/diastolik (DROPDOWN, rentang `DCU_LIMITS`), masing-masing wajib foto evidence → item `dcu`
   (`normalizeShiftStatusDcu`, hanya saat `isDemoMode`). Simpan = item rekan di
   record dipertahankan + item sendiri diganti (`handleSaveCurrentShiftStatus`). Gerbang checklist demo:
-  `isCurrentShiftStatusCompleted` = petugas login punya item ber-`attendancePhotoUrl` di shift ini. Go live tetap `ShiftStatusModal`. Tab Info → Petugas Jaga:
+  `isCurrentShiftStatusCompleted` = petugas login punya item ber-`attendancePhotoUrl` di shift ini ATAU absensi
+  dilewati (`skipCurrentShiftAttendance`, tombol "Lewati" di banner kunci & "Lewati Absensi" di modal; kunci
+  `shipId|shiftKey|userId` di memori, `isCurrentShiftAttendanceSkipped`; banner ungu + "Isi Absensi" tetap tersedia). Go live tetap `ShiftStatusModal`. Tab Info → Petugas Jaga:
   badge `crewBadge` hanya "Absensi x/y" (x = petugas jaga yang sudah absen); label di bawah nama dari absensi
   (`getAttendanceStatusView`): "Istirahat - Kondisi Baik/Tidak Baik" / "Patroli - Kondisi Baik" / "Belum absensi";
   kartu petugas bisa diklik (`onCrewClick`) → `AttendanceDetailModal` (status, keterangan, foto absensi, DCU + foto).

@@ -194,6 +194,8 @@ export default function ShiftAttendanceModal() {
     showShiftStatusModal,
     closeShiftStatusModal,
     handleSaveCurrentShiftStatus,
+    hasFilledCurrentShiftStatus,
+    skipCurrentShiftAttendance,
   } = usePatrol();
   const { currentUserRecord } = useRole();
   // Tiap petugas absen sendiri di HP masing-masing: form hanya untuk petugas yang login.
@@ -233,6 +235,16 @@ export default function ShiftAttendanceModal() {
       >
         Tutup
       </button>
+      {/* Khusus demo: absensi boleh dilewati agar checklist patroli langsung terbuka. */}
+      {!hasFilledCurrentShiftStatus && (
+        <button
+          type="button"
+          onClick={skipCurrentShiftAttendance}
+          className="rounded-2xl border border-fuchsia-400/30 bg-fuchsia-500/10 px-4 py-3 text-sm font-bold text-fuchsia-100 transition hover:border-fuchsia-300/50 hover:bg-fuchsia-500/20"
+        >
+          Lewati Absensi
+        </button>
+      )}
       <button
         type="button"
         onClick={handleSave}

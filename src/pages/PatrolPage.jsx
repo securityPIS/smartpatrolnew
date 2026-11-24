@@ -13,7 +13,7 @@ import { summarizeTimeAudit } from '../services/time/timeAudit';
 import {
   CheckCircle2, AlertTriangle, Search, Ship, MapPin, ExternalLink, ArrowLeft, Plus,
   CalendarDays, Thermometer, Wind, FileText, CircleOff, TimerReset, Clock, Nfc, CornerDownRight, Settings,
-  ImageIcon, ChevronDown,
+  ImageIcon, ChevronDown, MousePointerClick,
 } from 'lucide-react';
 import { useCollapsedGroups } from '../components/CheckpointGroupToggle';
 import { isDemoMode } from '../services/demoMode';
@@ -23,7 +23,7 @@ import { FollowUpToast } from '../components/incidentFollowUp/FollowUpPanels';
 import { DEMO_UNSOLVE_CHECKPOINT } from '../components/incidentFollowUp/demoUnsolveCheckpoint';
 import { usePatrolNfcScan } from '../hooks/usePatrolNfcScan';
 import { openNfcSettings } from '../services/native/nfc';
-import { createCheckpointNameKey, normalizeShipCheckpointDefinitions } from '../utils/shipCheckpoints';
+import { canManualCheckin, createCheckpointNameKey, normalizeShipCheckpointDefinitions } from '../utils/shipCheckpoints';
 import {
   createCheckpointTemuanKey, getCheckpointReferenceOverride, getIncidentCheckpointKey, isPatrolTemuanOpen, useFollowUpStoreVersion,
 } from '../components/incidentFollowUp/followUpStore';
@@ -390,13 +390,37 @@ const PatrolPage = React.memo(function PatrolPage() {
   );
 
   // Bar checkpoint = area simulasi tap NFC (laporan asli tetap lewat tap NFC fisik).
+  // Mode demo: bar = CHECK-IN MANUAL, hanya untuk titik yang diizinkan admin (allowManualCheckin)
+  // atau titik tanpa tag NFC; titik lain wajib tap NFC fisik.
   // Checklist terkunci → arahkan ke isian status shift dulu, bukan diam saja.
   const simulateTapForItem = (item, definition) => {
     if (isCheckpointLocked) {
       openShiftStatusModal();
       return;
     }
+    if (isDemoMode) {
+      if (!canManualCheckin(definition)) {
+        setDemoToast({ id: Date.now(), message: `${item.name} wajib tap NFC.\nCheck-in manual tidak diizinkan untuk titik ini — dekatkan HP ke tag NFC titik.` });
+        return;
+      }
+      setNfcSelection({ item, definition, verified: false, manual: true });
+      return;
+    }
     setNfcSelection({ item, definition, verified: false, simulated: true });
+  };
+
+  // Mode demo: penanda cara isi titik di bar (Manual = klik bar, Tap NFC = wajib tag fisik).
+  const renderCheckinModeChip = (definition) => {
+    if (!isDemoMode) return null;
+    return canManualCheckin(definition) ? (
+      <span className="shrink-0 inline-flex items-center gap-0.5 text-[9px] uppercase tracking-widest text-fuchsia-300 border border-fuchsia-500/40 px-1 py-0.5 rounded" title="Bisa diisi dengan klik bar (tanpa NFC)">
+        <MousePointerClick className="w-3 h-3" /> Manual
+      </span>
+    ) : (
+      <span className="shrink-0 inline-flex items-center gap-0.5 text-[9px] uppercase tracking-widest text-cyan-300 border border-cyan-600/50 px-1 py-0.5 rounded" title="Wajib tap NFC di titik ini">
+        <Nfc className="w-3 h-3" /> Tap NFC
+      </span>
+    );
   };
 
   // Flag temuan open: "x temuan open" selalu tampil (temuan baru ikut terhitung di sini karena
@@ -426,8 +450,10 @@ const PatrolPage = React.memo(function PatrolPage() {
         countNode: renderSubGroupCount(subGroup),
         toggleNode: renderSubGroupToggle(subGroup, item.name),
         flagNode: renderTemuanOpenFlag(temuanState),
-        // Mode demo: titik yang sudah dilapor bisa di-scan lagi (bar = area tap); detail lewat tombol.
-        onRescan: isDemoMode ? () => simulateTapForItem(item, definition) : null,
+        // Mode demo: titik yang sudah dilapor bisa di-scan lagi (bar = check-in manual bila diizinkan;
+        // selain itu lewat tap NFC asli, bar membuka laporan). Detail lewat tombol.
+        onRescan: isDemoMode && canManualCheckin(definition) ? () => simulateTapForItem(item, definition) : null,
+        modeChip: renderCheckinModeChip(definition),
       });
     }
     const hasOpenTemuan = temuanState.openTemuan.length > 0;
@@ -447,7 +473,9 @@ const PatrolPage = React.memo(function PatrolPage() {
             handleSimulateTap();
           }
         }}
-        aria-label={`Simulasi tap NFC di ${item.name}`}
+        aria-label={isDemoMode
+          ? (canManualCheckin(definition) ? `Check-in manual di ${item.name}` : `${item.name} wajib tap NFC`)
+          : `Simulasi tap NFC di ${item.name}`}
         className={`p-3 bg-[#0b1229] border rounded-xl transition-all cursor-pointer hover:border-fuchsia-500/50 active:scale-[0.99] ${definition?.type === 'sub' ? 'border-sky-900/60' : 'border-cyan-800/50'}`}
       >
         <div className="flex items-center justify-between gap-2">
@@ -458,6 +486,7 @@ const PatrolPage = React.memo(function PatrolPage() {
             <div className="flex items-center gap-2 min-w-0">
               <p className="font-bold text-white truncate">{item.name}</p>
               {renderSubGroupCount(subGroup)}
+              {renderCheckinModeChip(definition)}
               {item.isTemporaryShiftNode && (
                 <span className="shrink-0 text-[9px] uppercase tracking-widest text-yellow-300 border border-yellow-500/40 px-1.5 py-0.5 rounded">
                   Tambahan Shift
@@ -651,7 +680,7 @@ const PatrolPage = React.memo(function PatrolPage() {
         key={`${item.historyId || 'live'}-${item.id}`}
         role={options.onRescan ? 'button' : undefined}
         tabIndex={options.onRescan ? 0 : undefined}
-        aria-label={options.onRescan ? `Simulasi tap NFC di ${item.name}` : undefined}
+        aria-label={options.onRescan ? `Check-in manual di ${item.name}` : undefined}
         onClick={() => (options.onRescan ? options.onRescan() : handleOpenPatrolResult(item))}
         onKeyDown={options.onRescan ? (event) => {
           if (event.key === 'Enter' || event.key === ' ') {
@@ -665,6 +694,7 @@ const PatrolPage = React.memo(function PatrolPage() {
           <div className="flex items-center gap-2 mb-0.5">
             <p className={`font-bold ${meta.itemTextClass}`}>{item.name}</p>
             {options.countNode}
+            {options.modeChip}
             {item.nfcVerification?.tagId && (
               <span className="inline-flex items-center gap-0.5 text-[9px] uppercase tracking-widest text-emerald-300 border border-emerald-500/40 px-1 py-0.5 rounded" title="Dilaporkan lewat tap NFC"><Nfc className="w-3 h-3" /> NFC</span>
             )}

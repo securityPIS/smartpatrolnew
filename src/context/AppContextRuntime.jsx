@@ -8859,6 +8859,8 @@ export function AppProvider({ children }) {
       nfcTagId,
       referencePhotoUrl,
       referencePhotoUpdatedAt: photoChanged ? getTrustedDate().toISOString() : (existing?.referencePhotoUpdatedAt || null),
+      // Opsi check-in manual hanya bisa diubah di mode demo; go live mempertahankan nilai lama.
+      allowManualCheckin: isDemoMode ? Boolean(draft.allowManualCheckin) : Boolean(existing?.allowManualCheckin),
     };
 
     let nextCheckpoints;

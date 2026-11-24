@@ -92,6 +92,12 @@ sesi berasal dari validator klien (`resetAuthSession`, tidak sign-out Supabase).
   bulan +2 dst. kosong sampai direncanakan. Tombol **Clear all** (admin) → `handleScheduleReplaceMonth` /
   `replaceMonthPlan` mengosongkan seluruh rencana satu bulan (bisa Urungkan via snapshot roster); DITOLAK
   untuk bulan berjalan & bulan sebelumnya. Go live tetap pewarisan berantai tanpa Clear all.
+- Check-in manual (DEMO saja): definisi titik punya `allowManualCheckin` (normalisasi di `shipCheckpoints.js`,
+  `canManualCheckin(def)` = flag ATAU titik tanpa NFC). Admin centang "Izinkan check-in manual" di editor tab TITIK
+  (hanya tampil saat `isDemoMode`; go live `saveShipCheckpointDefinition` mempertahankan nilai lama). Patroli demo:
+  bar titik diizinkan → sheet "Check-in Manual" (`selection.manual`, tanpa nfcVerification); titik lain → toast
+  "wajib tap NFC" (titik selesai: bar buka laporan, scan ulang via NFC). Chip "Manual"/"Tap NFC" di bar. Seed demo:
+  default diizinkan, `NFC_ONLY` untuk Anjungan, Lampu Navigasi, Gangway, Pintu Akses Buritan. Go live tidak berubah.
 - Fungsi `subscribeTo*` di services/backend harus return noop bila `!isSupabaseConfigured` (dulu throw →
   crash dashboard admin). Satu-satunya request backend di demo: trusted time `server-time` (baca jam saja).
 

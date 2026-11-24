@@ -6,7 +6,8 @@ Caller: AppContextRuntime (normalisasi ships.customCheckpoints + handler admin) 
 Dependensi: utils/sanitize.
 Main Functions: normalizeShipCheckpointDefinitions (dedupe + merge + urutkan main→sub),
         groupCheckpointHierarchy (untuk tampilan), getCheckpointCompleteness (NFC & foto wajib),
-        sanitizeNfcTagId, findNfcTagOwner (cegah satu tag dipakai dua titik).
+        sanitizeNfcTagId, findNfcTagOwner (cegah satu tag dipakai dua titik),
+        canManualCheckin (mode demo: titik boleh diisi lewat klik bar tanpa NFC).
 Side Effects: Tidak ada (fungsi murni).
 */
 
@@ -66,7 +67,15 @@ function normalizeCheckpointDefinition(checkpoint) {
     nfcTagId: sanitizeNfcTagId(checkpoint?.nfcTagId),
     referencePhotoUrl: sanitizeUrl(checkpoint?.referencePhotoUrl || '') || null,
     referencePhotoUpdatedAt: sanitizeText(checkpoint?.referencePhotoUpdatedAt || '', 40) || null,
+    // Mode demo: admin bisa mengizinkan check-in manual (klik bar checkpoint tanpa tap NFC).
+    allowManualCheckin: Boolean(checkpoint?.allowManualCheckin),
   };
+}
+
+// Titik boleh diisi lewat klik bar (tanpa NFC) bila diizinkan admin, atau titik memang belum punya
+// tag NFC (tambahan shift / belum didaftarkan) sehingga tidak mungkin di-tap.
+export function canManualCheckin(definition) {
+  return Boolean(definition?.allowManualCheckin) || !sanitizeNfcTagId(definition?.nfcTagId);
 }
 
 /*
@@ -101,6 +110,8 @@ export function normalizeShipCheckpointDefinitions(checkpoints = []) {
       referencePhotoUpdatedAt: next.referencePhotoUrl
         ? (next.referencePhotoUpdatedAt || existing.referencePhotoUpdatedAt)
         : existing.referencePhotoUpdatedAt,
+      // Hanya entri yang menyebut flag ini (data tersimpan) yang menimpa; titik default tidak.
+      allowManualCheckin: checkpoint?.allowManualCheckin !== undefined ? next.allowManualCheckin : existing.allowManualCheckin,
     });
   });
 

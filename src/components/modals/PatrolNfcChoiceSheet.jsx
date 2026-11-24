@@ -9,7 +9,7 @@ Dependensi: AsyncImage, useFocusTrap.
 */
 
 import React from 'react';
-import { AlertTriangle, Ban, CheckCircle2, ChevronLeft, CornerDownRight, FilePlus2, ImageIcon, Nfc, PencilLine, X } from 'lucide-react';
+import { AlertTriangle, Ban, CheckCircle2, ChevronLeft, CornerDownRight, FilePlus2, ImageIcon, MousePointerClick, Nfc, PencilLine, X } from 'lucide-react';
 import AsyncImage from '../AsyncImage';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 
@@ -44,7 +44,7 @@ export default function PatrolNfcChoiceSheet({ selection, openTemuan = [], refer
   const [isPickingTemuan, setIsPickingTemuan] = React.useState(false);
   if (!selection) return null;
 
-  const { item, definition, verified, simulated } = selection;
+  const { item, definition, verified, simulated, manual } = selection;
   const referencePhotoUrl = referenceOverride?.referencePhotoUrl || definition?.referencePhotoUrl || null;
   const hasOpenTemuan = openTemuan.length > 0;
   const isSub = definition?.type === 'sub';
@@ -68,7 +68,11 @@ export default function PatrolNfcChoiceSheet({ selection, openTemuan = [], refer
       >
         <div className="p-5 space-y-4">
           <div className="flex items-start justify-between gap-3">
-            {simulated ? (
+            {manual ? (
+              <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-fuchsia-500/15 border border-fuchsia-500/40 text-fuchsia-200 text-[10px] font-black uppercase tracking-widest">
+                <MousePointerClick className="w-3.5 h-3.5" /> Check-in Manual
+              </span>
+            ) : simulated ? (
               <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-fuchsia-500/15 border border-fuchsia-500/40 text-fuchsia-200 text-[10px] font-black uppercase tracking-widest">
                 <Nfc className="w-3.5 h-3.5" /> Simulasi Tap NFC
               </span>

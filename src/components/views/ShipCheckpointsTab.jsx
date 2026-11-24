@@ -3,11 +3,13 @@ Tujuan: Tab TITIK di detail armada — pengaturan main checkpoint & sub checkpoi
         wajib punya tag NFC dan foto kondisi awal (acuan foto patroli).
 Caller: ShipsPage (shipDetailTab === 'checkpoints').
 Dependensi: useShips/useReports (AppContextRuntime), utils/shipCheckpoints, services/native/nfc.
+Mode demo: tiap titik punya centang "Izinkan check-in manual" — bila dicentang, petugas bisa mengisi
+        titik dengan klik bar checkpoint tanpa tap NFC. Opsi ini hanya tampil/bisa diubah di demo.
 */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, Camera, CheckCircle2, CornerDownRight, ImageIcon, Loader2, Lock, Nfc,
+  AlertTriangle, Camera, CheckCircle2, CornerDownRight, ImageIcon, Loader2, Lock, MousePointerClick, Nfc,
   Pencil, PlusCircle, Save, ScanLine, ShieldAlert, Trash2, X,
 } from 'lucide-react';
 import { useReports, useShips } from '../../context/AppContextRuntime';
@@ -17,6 +19,7 @@ import {
   CHECKPOINT_TYPE_MAIN, CHECKPOINT_TYPE_SUB, getCheckpointCompleteness, getRegistrableNfcTagId, groupCheckpointHierarchy, sanitizeNfcTagId,
 } from '../../utils/shipCheckpoints';
 import { getNfcSupport, openNfcSettings, startNfcTagScan } from '../../services/native/nfc';
+import { isDemoMode } from '../../services/demoMode';
 
 const inputClass = 'w-full bg-[#070b19] border border-cyan-800/50 rounded-lg p-2.5 text-sm focus:border-cyan-400 outline-none text-white placeholder:text-cyan-800';
 
@@ -53,6 +56,11 @@ function CheckpointRow({ checkpoint, code, isSub, subCount, onEdit, onAddSub, on
         <div className="flex flex-wrap gap-1 mt-1.5">
           <RequirementChip ok={hasNfc} icon={Nfc} okLabel={checkpoint.nfcTagId} missingLabel="NFC belum ada" />
           <RequirementChip ok={hasPhoto} icon={ImageIcon} okLabel="Foto acuan" missingLabel="Foto belum ada" />
+          {isDemoMode && checkpoint.allowManualCheckin && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold text-fuchsia-300 border-fuchsia-500/40 bg-fuchsia-500/10" title="Petugas bisa mengisi titik ini dengan klik bar checkpoint tanpa tap NFC">
+              <MousePointerClick className="w-3 h-3 shrink-0" /> Check-in manual
+            </span>
+          )}
           {!isSub && subCount > 0 && (
             <span className="inline-flex items-center px-1.5 py-0.5 rounded border text-[10px] font-bold text-sky-300 border-sky-700/60">{subCount} sub</span>
           )}
@@ -87,6 +95,7 @@ function CheckpointEditor({ editor, parentName, onCancel, onSaved }) {
     desc: editor.checkpoint?.desc || '',
     nfcTagId: editor.checkpoint?.nfcTagId || '',
     referencePhotoUrl: editor.checkpoint?.referencePhotoUrl || null,
+    allowManualCheckin: Boolean(editor.checkpoint?.allowManualCheckin),
   }));
   const [error, setError] = useState('');
   const [nfcState, setNfcState] = useState({ scanning: false, message: '', contents: [] });
@@ -223,6 +232,22 @@ function CheckpointEditor({ editor, parentName, onCancel, onSaved }) {
         </button>
         <p className="text-[11px] text-cyan-600">Foto ini jadi acuan: petugas memotret dari sudut yang sama saat patroli untuk dibandingkan.</p>
       </div>
+
+      {isDemoMode && (
+        <label htmlFor="cp-allow-manual" className="flex items-start gap-2.5 p-3 rounded-xl border border-fuchsia-500/30 bg-fuchsia-500/5 cursor-pointer">
+          <input
+            id="cp-allow-manual"
+            type="checkbox"
+            checked={draft.allowManualCheckin}
+            onChange={e => update({ allowManualCheckin: e.target.checked })}
+            className="mt-0.5 w-4 h-4 accent-fuchsia-500 shrink-0"
+          />
+          <span className="min-w-0">
+            <span className="block text-xs font-bold text-fuchsia-200 flex items-center gap-1"><MousePointerClick className="w-3.5 h-3.5" /> Izinkan check-in manual</span>
+            <span className="block text-[11px] text-fuchsia-300/80 mt-0.5">Petugas bisa mengisi titik ini dengan klik bar checkpoint tanpa tap NFC. Tanpa centang, titik wajib di-tap NFC. (Khusus mode demo)</span>
+          </span>
+        </label>
+      )}
 
       <div className="flex flex-wrap gap-1.5">
         {[['Nama', hasName], ['NFC', hasNfc], ['Foto acuan', hasPhoto]].map(([label, ok]) => (

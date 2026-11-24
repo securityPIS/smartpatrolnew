@@ -55,12 +55,15 @@ const photo = (title, index) => createPosterDataUrl(title, 'Foto kondisi awal (d
 
 // Titik ber-NFC wajib punya foto acuan. Nama titik default (Haluan, Anjungan, ...) digabung dengan
 // definisi bawaan saat normalisasi sehingga NFC & foto di sini mengisi titik default tersebut.
+// Default demo: check-in manual diizinkan (klik bar tanpa NFC); titik `NFC_ONLY` wajib tap NFC.
+const NFC_ONLY = { allowManualCheckin: false };
+
 function checkpoint(id, name, nfcTagId, photoIndex, extra = {}) {
-  return { id, name, type: 'main', nfcTagId, referencePhotoUrl: photo(name, photoIndex), ...extra };
+  return { id, name, type: 'main', nfcTagId, referencePhotoUrl: photo(name, photoIndex), allowManualCheckin: true, ...extra };
 }
 
-function subCheckpoint(id, name, parentId, nfcTagId, photoIndex, desc) {
-  return checkpoint(id, name, nfcTagId, photoIndex, { type: 'sub', parentId, desc });
+function subCheckpoint(id, name, parentId, nfcTagId, photoIndex, desc, extra = {}) {
+  return checkpoint(id, name, nfcTagId, photoIndex, { type: 'sub', parentId, desc, ...extra });
 }
 
 export function createDemoShips() {
@@ -83,14 +86,14 @@ export function createDemoShips() {
       personnel: ['demo-petugas', 'demo-petugas-2', 'demo-petugas-3'],
       customCheckpoints: [
         checkpoint('cpdef-haluan', 'Haluan', 'DEMO-NFC-01', 0, { isDefault: true }),
-        checkpoint('cpdef-anjungan', 'Anjungan', 'DEMO-NFC-02', 1, { isDefault: true }),
+        checkpoint('cpdef-anjungan', 'Anjungan', 'DEMO-NFC-02', 1, { isDefault: true, ...NFC_ONLY }),
         checkpoint('cpdef-ruang-mesin', 'Ruang Mesin', 'DEMO-NFC-03', 3, { isDefault: true }),
         checkpoint('cpdef-sekoci', 'Sekoci', 'DEMO-NFC-06', 4, { isDefault: true }),
         checkpoint('cpdef-buritan', 'Buritan', 'DEMO-NFC-07', 0, { isDefault: true }),
         checkpoint('demo-pagar-dek-kiri', DEMO_UNSOLVE_CHECKPOINT_NAME, 'DEMO-NFC-05', 5, { desc: 'Pagar pengaman dek sisi kiri' }),
         subCheckpoint('demo-panel-listrik', 'Panel Listrik Mesin', 'cpdef-ruang-mesin', 'DEMO-NFC-04', 4, 'Sub titik di Ruang Mesin'),
         subCheckpoint('demo-generator-darurat', 'Generator Darurat', 'cpdef-ruang-mesin', 'DEMO-NFC-08', 2, 'Sub titik di Ruang Mesin'),
-        subCheckpoint('demo-lampu-navigasi', 'Lampu Navigasi', 'cpdef-anjungan', 'DEMO-NFC-09', 1, 'Lampu navigasi sisi kanan & kiri'),
+        subCheckpoint('demo-lampu-navigasi', 'Lampu Navigasi', 'cpdef-anjungan', 'DEMO-NFC-09', 1, 'Lampu navigasi sisi kanan & kiri', NFC_ONLY),
       ],
     },
     {
@@ -113,7 +116,7 @@ export function createDemoShips() {
         checkpoint('cpdef-anjungan', 'Anjungan', 'DEMO2-NFC-02', 3, { isDefault: true }),
         checkpoint('cpdef-ruang-pompa', 'Ruang Pompa', 'DEMO2-NFC-03', 4, { isDefault: true }),
         checkpoint('demo2-manifold', 'Manifold Kargo', 'DEMO2-NFC-04', 2, { desc: 'Area sambungan selang bongkar muat' }),
-        checkpoint('demo2-gangway', 'Gangway', 'DEMO2-NFC-05', 0, { desc: 'Akses naik-turun kapal' }),
+        checkpoint('demo2-gangway', 'Gangway', 'DEMO2-NFC-05', 0, { desc: 'Akses naik-turun kapal', ...NFC_ONLY }),
         subCheckpoint('demo2-pompa-kargo', 'Pompa Kargo', 'cpdef-ruang-pompa', 'DEMO2-NFC-06', 4, 'Sub titik di Ruang Pompa'),
         subCheckpoint('demo2-tangki-ballast', 'Tangki Ballast', 'demo2-manifold', 'DEMO2-NFC-07', 1, 'Katup & manhole tangki ballast'),
       ],
@@ -137,7 +140,7 @@ export function createDemoShips() {
         checkpoint('cpdef-haluan', 'Haluan', 'DEMO3-NFC-01', 3, { isDefault: true }),
         checkpoint('cpdef-ruang-mesin', 'Ruang Mesin', 'DEMO3-NFC-02', 0, { isDefault: true }),
         checkpoint('cpdef-gudang-logistik', 'Gudang Logistik', 'DEMO3-NFC-03', 2, { isDefault: true, desc: 'Penyimpanan APAR, P3K & suku cadang' }),
-        checkpoint('demo3-pintu-buritan', 'Pintu Akses Buritan', 'DEMO3-NFC-04', 5, { desc: 'Pintu kedap air akses buritan' }),
+        checkpoint('demo3-pintu-buritan', 'Pintu Akses Buritan', 'DEMO3-NFC-04', 5, { desc: 'Pintu kedap air akses buritan', ...NFC_ONLY }),
         subCheckpoint('demo3-ruang-abk', 'Ruang ABK', 'cpdef-gudang-logistik', 'DEMO3-NFC-05', 1, 'Kabin awak kapal'),
       ],
     },
